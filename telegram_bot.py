@@ -1,11 +1,12 @@
+from dotenv import load_dotenv
+import os
+load_dotenv()
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 import logging
 
 # ===== تنظیمات =====
-TELEGRAM_TOKEN = "8501050661:AAFr_iOwGqhVWO9XwY-vzovVKhs0zUXVj_k"  # توکن ربات از BotFather
-ADMIN_GROUP_ID = -1004358699434  # آیدی گروه ادمین
-
+TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")
 # ===================================================
 # ✏️ اینجا هر هفته تحلیل‌ها رو آپدیت کن
 # ===================================================
