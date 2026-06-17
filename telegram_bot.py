@@ -105,17 +105,7 @@ async def is_member_of_channel(bot, user_id):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in users:
-        # کاربر قبلاً ثبت‌نام کرده — فقط عضویت رو چک کن
-        is_member = await is_member_of_channel(context.bot, user_id)
-        if is_member:
-            await show_main_menu(update, context)
-            return MAIN_MENU
-        else:
-            await ask_to_join_channel(update, context)
-            return CHECK_MEMBERSHIP
-
+    # هر بار /start زده بشه، از اول شروع می‌کنیم (اسم و شماره دوباره پرسیده می‌شه)
     await update.message.reply_text(
         "👋 سلام! به ربات تحلیل بازار خوش اومدی.\n\n"
         "لطفاً اسمت رو بنویس:"
