@@ -249,10 +249,8 @@ async def check_membership_callback(update: Update, context: ContextTypes.DEFAUL
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="gold")],
-        [InlineKeyboardButton("💵 تحلیل دلار", callback_data="dollar")],
-        [InlineKeyboardButton("₿ تحلیل بیتکوین", callback_data="bitcoin")],
-        [InlineKeyboardButton("🧮 محاسبه قیمت طلای ۱۸ عیار", callback_data="gold_calc")],
+        [InlineKeyboardButton("📊 تحلیل بازار", callback_data="analysis_menu")],
+        [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
     ])
     user_id = update.effective_user.id
     name = users.get(user_id, {}).get("name", "کاربر")
@@ -261,6 +259,22 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard)
     elif update.callback_query:
         await update.callback_query.message.reply_text(text, reply_markup=keyboard)
+
+
+async def show_analysis_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="gold")],
+        [InlineKeyboardButton("💵 تحلیل دلار", callback_data="dollar")],
+        [InlineKeyboardButton("₿ تحلیل بیتکوین", callback_data="bitcoin")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(
+        "📊 تحلیل بازار\n\nکدام دارایی را می‌خواهی؟",
+        reply_markup=keyboard,
+    )
+    return MAIN_MENU
 
 
 async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -324,16 +338,13 @@ def calc_gold18(ounce_usd: float, dollar_toman: float) -> tuple[float, float]:
 def gold_result_text(ounce_usd: float, dollar_toman: float, source: str) -> str:
     gram_usd, gram_toman = calc_gold18(ounce_usd, dollar_toman)
     return (
-        f"📊 قیمت طلای ۱۸ عیار {source}\n"
+        f"📊 ارزش واقعی طلای ۱۸ عیار {source}\n"
         f"{'─' * 32}\n"
         f"🔸 اونس جهانی: {ounce_usd:,.2f} دلار\n"
         f"🔸 نرخ دلار (بازار آزاد): {dollar_toman:,.0f} تومان\n"
         f"{'─' * 32}\n"
-        f"💰 هر گرم طلای ۱۸ عیار:\n"
-        f"   • {gram_usd:,.2f} دلار\n"
-        f"   • {gram_toman:,.0f} تومان\n"
-        f"{'─' * 32}\n"
-        f"📌 فرمول: (اونس ÷ ۳۱.۱۰۳۵) × ۷۵٪ × نرخ دلار"
+        f"💰 ارزش هر گرم طلای ۱۸ عیار:\n"
+        f"   {gram_toman:,.0f} تومان"
     )
 
 
@@ -343,13 +354,12 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📡 قیمت فعلی (لحظه‌ای از tgju)", callback_data="gold_live")],
+        [InlineKeyboardButton("📡 محاسبه ارزش فعلی", callback_data="gold_live")],
         [InlineKeyboardButton("✏️ محاسبه با مفروضات دلخواه", callback_data="gold_custom")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        "🧮 محاسبه قیمت طلای ۱۸ عیار\n\n"
-        "کدام روش را می‌خواهی؟",
+        "🧮 محاسبه ارزش واقعی طلای ۱۸ عیار\n\nکدام روش را می‌خواهی؟",
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -358,18 +368,17 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("⏳ در حال دریافت قیمت‌های لحظه‌ای از tgju ...")
+    await query.message.reply_text("⏳ در حال دریافت قیمت‌های لحظه‌ای ...")
 
     ounce = await fetch_tgju_price("ons")
     dollar = await fetch_tgju_price("price_dollar_rl")
 
     if not ounce or not dollar:
         await query.message.reply_text(
-            "⚠️ دریافت قیمت از tgju موفق نبود. لطفاً دقایقی دیگر دوباره امتحان کن یا از روش دستی استفاده کن."
+            "⚠️ دریافت قیمت لحظه‌ای موفق نبود. لطفاً دقایقی دیگر دوباره امتحان کن یا از روش دستی استفاده کن."
         )
         return MAIN_MENU
 
-    # دلار در tgju به ریال است، تبدیل به تومان
     dollar_toman = dollar / 10
 
     keyboard = InlineKeyboardMarkup([
@@ -389,6 +398,11 @@ async def gold_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     await query.message.reply_text(
         "✏️ محاسبه با مفروضات دلخواه\n\n"
+        "💡 با این ابزار می‌تونی با وارد کردن پیش‌بینی قیمت اونس طلا و نرخ دلار در آینده، "
+        "ارزش طلای ۱۸ عیار رو برای هر سناریویی محاسبه کنی.\n\n"
+        "مثلاً اگه فکر می‌کنی اونس به ۳۰۰۰ دلار می‌رسه و دلار ۸۰ هزار تومان می‌شه، "
+        "همین اعداد رو وارد کن تا ببینی طلا چقدر می‌ارزه.\n\n"
+        "━━━━━━━━━━━━━━━━━\n"
         "قیمت اونس جهانی طلا را به دلار وارد کن:\n"
         "(مثال: 2350)"
     )
@@ -462,6 +476,7 @@ def main():
                 CallbackQueryHandler(check_membership_callback, pattern="^check_membership$"),
             ],
             MAIN_MENU: [
+                CallbackQueryHandler(show_analysis_menu, pattern="^analysis_menu$"),
                 CallbackQueryHandler(show_analysis, pattern="^(gold|dollar|bitcoin)$"),
                 CallbackQueryHandler(back_to_menu, pattern="^menu$"),
                 CallbackQueryHandler(gold_calc_start, pattern="^gold_calc$"),
@@ -478,6 +493,7 @@ def main():
         fallbacks=[CommandHandler("start", start)],
     )
     app.add_handler(conv)
+    app.add_handler(CallbackQueryHandler(show_analysis_menu, pattern="^analysis_menu$"))
     app.add_handler(CallbackQueryHandler(show_analysis, pattern="^(gold|dollar|bitcoin)$"))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern="^menu$"))
     app.add_handler(CallbackQueryHandler(check_membership_callback, pattern="^check_membership$"))
