@@ -251,6 +251,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 تحلیل بازار", callback_data="analysis_menu")],
         [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
+        [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
     ])
     user_id = update.effective_user.id
@@ -642,6 +643,225 @@ async def calendar_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
+# ===== حباب صندوق‌ها از فاندبیس =====
+async def fetch_bubble_data(fund_type: str) -> list | None:
+    """
+    fund_type: 'gold' یا 'silver'
+    برای طلا از fundbase.ir/h می‌خواند
+    برای نقره از fundbase.ir/h/silver می‌خواند
+    """
+    import aiohttp
+    from html.parser import HTMLParser
+
+    url = "https://fundbase.ir/h" if fund_type == "gold" else "https://fundbase.ir/h/silver"
+
+    class TableParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_table = False
+            self.in_row = False
+            self.in_cell = False
+            self.rows = []
+            self.current_row = []
+            self.current_cell = ""
+            self.depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "table":
+                self.in_table = True
+                self.depth += 1
+            elif tag == "tr" and self.in_table:
+                self.in_row = True
+                self.current_row = []
+            elif tag in ("td", "th") and self.in_row:
+                self.in_cell = True
+                self.current_cell = ""
+
+        def handle_endtag(self, tag):
+            if tag == "table":
+                self.depth -= 1
+                if self.depth == 0:
+                    self.in_table = False
+            elif tag == "tr" and self.in_row:
+                if self.current_row:
+                    self.rows.append(self.current_row[:])
+                self.in_row = False
+            elif tag in ("td", "th") and self.in_cell:
+                self.current_row.append(self.current_cell.strip())
+                self.in_cell = False
+
+        def handle_data(self, data):
+            if self.in_cell:
+                self.current_cell += data
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "fa-IR,fa;q=0.9",
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    logger.error(f"fundbase status: {resp.status}")
+                    return None
+                html = await resp.text(encoding="utf-8", errors="ignore")
+
+        parser = TableParser()
+        parser.feed(html)
+
+        # اولین جدول با بیش از ۲ ستون که داده دارد
+        funds = []
+        for row in parser.rows:
+            if len(row) >= 4:
+                name = row[0].strip()
+                price = row[1].strip() if len(row) > 1 else "—"
+                bubble_price = row[2].strip() if len(row) > 2 else "—"
+                bubble_intrinsic = row[3].strip() if len(row) > 3 else "—"
+                bubble_total = row[4].strip() if len(row) > 4 else "—"
+                # رد کردن هدر
+                if name in ("نماد", "صندوق", ""):
+                    continue
+                funds.append({
+                    "name": name,
+                    "price": price,
+                    "bubble_price": bubble_price,
+                    "bubble_intrinsic": bubble_intrinsic,
+                    "bubble_total": bubble_total,
+                })
+        return funds if funds else None
+
+    except Exception as e:
+        logger.error(f"خطا در scraping فاندبیس: {e}")
+        return None
+
+
+def bubble_icon(val: str) -> str:
+    """آیکون مثبت/منفی/صفر بر اساس مقدار حباب"""
+    clean = val.replace("٪", "").replace("%", "").replace("‎", "").replace("+", "").replace("−", "-").strip()
+    try:
+        num = float(clean)
+        if num > 1:
+            return "🔴"
+        elif num > 0:
+            return "🟡"
+        elif num < 0:
+            return "🟢"
+        else:
+            return "⚪"
+    except Exception:
+        return ""
+
+
+async def bubble_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🥇 حباب صندوق‌های طلا", callback_data="bubble_gold")],
+        [InlineKeyboardButton("🪙 حباب صندوق‌های نقره", callback_data="bubble_silver")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(
+        "🫧 حباب صندوق‌های سرمایه‌گذاری\n\nداده‌ها از فاندبیس دریافت می‌شوند.\nکدام دسته را می‌خواهی؟",
+        reply_markup=keyboard,
+    )
+    return MAIN_MENU
+
+
+async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import io
+
+    query = update.callback_query
+    await query.answer()
+    fund_type = "gold" if query.data == "bubble_gold" else "silver"
+    label = "طلا 🥇" if fund_type == "gold" else "نقره 🪙"
+
+    await query.message.reply_text(f"⏳ در حال دریافت حباب صندوق‌های {label} ...")
+
+    funds = await fetch_bubble_data(fund_type)
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data=query.data)],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="bubble_menu")],
+    ])
+
+    if not funds:
+        await query.message.reply_text(
+            "⚠️ دریافت داده از فاندبیس موفق نبود. لطفاً دقایقی دیگر امتحان کن.",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+
+    # پارس کردن مقادیر عددی حباب کل
+    names = []
+    values = []
+    for f in funds:
+        raw = f["bubble_total"].replace("٪", "").replace("%", "").replace("+", "").replace("−", "-").replace("‎", "").strip()
+        try:
+            val = float(raw)
+            names.append(f["name"])
+            values.append(val)
+        except Exception:
+            continue
+
+    if not names:
+        await query.message.reply_text("⚠️ داده‌های عددی قابل نمایش نبودند.", reply_markup=keyboard)
+        return MAIN_MENU
+
+    # رنگ‌بندی میله‌ها
+    colors = []
+    for v in values:
+        if v > 1:
+            colors.append("#e53935")   # قرمز
+        elif v > 0:
+            colors.append("#FFA726")   # نارنجی
+        elif v < 0:
+            colors.append("#43A047")   # سبز
+        else:
+            colors.append("#90A4AE")   # خاکستری
+
+    # رسم نمودار
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.patch.set_facecolor("#FAFAFA")
+    ax.set_facecolor("#FAFAFA")
+
+    bars = ax.bar(names, values, color=colors, width=0.6, zorder=3)
+    ax.axhline(0, color="#999999", linewidth=1, linestyle="--", zorder=2)
+
+    # برچسب روی هر میله
+    for bar, val in zip(bars, values):
+        sign = "+" if val >= 0 else ""
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + (0.2 if val >= 0 else -0.5),
+            f"{sign}{val:.1f}٪",
+            ha="center", va="bottom" if val >= 0 else "top",
+            fontsize=9, fontweight="bold", color="#333333"
+        )
+
+    title_fa = "حباب‌سنج صندوق‌های طلا" if fund_type == "gold" else "حباب‌سنج صندوق‌های نقره"
+    ax.set_title(title_fa, fontsize=14, fontweight="bold", color="#1a1a2e", pad=12)
+    ax.set_ylabel("حباب کل (٪)", fontsize=10, color="#444")
+    ax.tick_params(axis="x", labelsize=9, rotation=30)
+    ax.tick_params(axis="y", labelsize=9)
+    ax.grid(axis="y", linestyle="--", alpha=0.4, zorder=1)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    buf.seek(0)
+    plt.close(fig)
+
+    await query.message.reply_photo(photo=buf, caption=f"🫧 حباب صندوق‌های {label}\nمنبع: فاندبیس", reply_markup=keyboard)
+    return MAIN_MENU
+
+
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
@@ -665,6 +885,8 @@ def main():
                 CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"),
                 CallbackQueryHandler(calendar_today, pattern="^cal_today$"),
                 CallbackQueryHandler(calendar_week, pattern="^cal_week$"),
+                CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"),
+                CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"),
             ],
             GOLD_CALC_OUNCE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_ounce),
@@ -686,6 +908,8 @@ def main():
     app.add_handler(CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"))
     app.add_handler(CallbackQueryHandler(calendar_today, pattern="^cal_today$"))
     app.add_handler(CallbackQueryHandler(calendar_week, pattern="^cal_week$"))
+    app.add_handler(CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"))
+    app.add_handler(CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"))
     logger.info("✅ ربات در حال اجراست...")
     app.run_polling()
 

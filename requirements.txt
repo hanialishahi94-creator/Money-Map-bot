@@ -3,3 +3,5 @@ python-dotenv==1.0.1
 # rebuild
 
 aiohttp==3.9.5
+
+matplotlib==3.9.0
