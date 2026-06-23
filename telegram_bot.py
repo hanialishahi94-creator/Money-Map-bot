@@ -481,12 +481,15 @@ async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
     import aiohttp
     url = f"https://nfs.faireconomy.media/ff_calendar_{week}.json"
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                logger.info(f"FF status: {resp.status}")
                 if resp.status != 200:
                     return None
-                return await resp.json(content_type=None)
+                data = await resp.json(content_type=None)
+                logger.info(f"FF count: {len(data)}, sample: {data[0] if data else None}")
+                return data
     except Exception as e:
         logger.error(f"خطا در دریافت تقویم: {e}")
         return None
