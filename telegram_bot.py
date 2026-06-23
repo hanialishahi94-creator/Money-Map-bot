@@ -251,6 +251,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 تحلیل بازار", callback_data="analysis_menu")],
         [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
+        [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
     ])
     user_id = update.effective_user.id
     name = users.get(user_id, {}).get("name", "کاربر")
@@ -462,6 +463,174 @@ async def gold_calc_get_dollar(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 
+# ===== تقویم اقتصادی =====
+
+CURRENCY_FA = {
+    "USD": "🇺🇸 دلار آمریکا",
+    "EUR": "🇪🇺 یورو",
+    "GBP": "🇬🇧 پوند انگلیس",
+    "AUD": "🇦🇺 دلار استرالیا",
+    "NZD": "🇳🇿 دلار نیوزلند",
+    "JPY": "🇯🇵 ین ژاپن",
+}
+
+TARGET_CURRENCIES = set(CURRENCY_FA.keys())
+
+
+async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
+    import aiohttp
+    url = f"https://nfs.faireconomy.media/ff_calendar_{week}.json"
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.json(content_type=None)
+    except Exception as e:
+        logger.error(f"خطا در دریافت تقویم: {e}")
+        return None
+
+
+def filter_events(events: list, today_only: bool = False) -> list:
+    from datetime import datetime, timezone
+    result = []
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    for e in events:
+        if e.get("impact", "").lower() != "high":
+            continue
+        if e.get("currency", "") not in TARGET_CURRENCIES:
+            continue
+        date_str = e.get("date", "")
+        if today_only and not date_str.startswith(today_str):
+            continue
+        result.append(e)
+    return result
+
+
+def format_event(e: dict) -> str:
+    from datetime import datetime, timezone, timedelta
+    currency = e.get("currency", "")
+    currency_fa = CURRENCY_FA.get(currency, currency)
+    title_en = e.get("title", "")
+    forecast = e.get("forecast", "") or "—"
+    previous = e.get("previous", "") or "—"
+
+    # تبدیل زمان UTC به تهران (UTC+3:30)
+    date_raw = e.get("date", "")
+    try:
+        dt_utc = datetime.fromisoformat(date_raw.replace("Z", "+00:00"))
+        dt_tehran = dt_utc + timedelta(hours=3, minutes=30)
+        time_str = dt_tehran.strftime("%H:%M")
+        day_str = dt_tehran.strftime("%Y/%m/%d")
+    except Exception:
+        time_str = "—"
+        day_str = "—"
+
+    return (
+        f"🔴 {currency_fa}\n"
+        f"📌 {title_en}\n"
+        f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
+        f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
+    )
+
+
+async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 تقویم امروز", callback_data="cal_today")],
+        [InlineKeyboardButton("📆 تقویم این هفته", callback_data="cal_week")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(
+        "🗓 تقویم اقتصادی\n\nاخبار مهم (🔴 High Impact) ارزهای اصلی\nکدام بازه را می‌خواهی؟",
+        reply_markup=keyboard,
+    )
+    return MAIN_MENU
+
+
+async def calendar_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("⏳ در حال دریافت تقویم امروز ...")
+
+    events = await fetch_ff_calendar("thisweek")
+    if events is None:
+        await query.message.reply_text("⚠️ دریافت تقویم موفق نبود. لطفاً بعداً امتحان کن.")
+        return MAIN_MENU
+
+    filtered = filter_events(events, today_only=True)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📆 تقویم این هفته", callback_data="cal_week")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+
+    if not filtered:
+        await query.message.reply_text(
+            "✅ امروز هیچ خبر مهمی (🔴) برای ارزهای اصلی وجود ندارد.",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+
+    text = "📅 اخبار مهم امروز\n" + "━" * 30 + "\n\n"
+    for e in filtered:
+        text += format_event(e) + "\n"
+
+    # تلگرام حداکثر ۴۰۹۶ کاراکتر قبول می‌کند
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+
+    await query.message.reply_text(text, reply_markup=keyboard)
+    return MAIN_MENU
+
+
+async def calendar_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("⏳ در حال دریافت تقویم هفته ...")
+
+    events = await fetch_ff_calendar("thisweek")
+    if events is None:
+        await query.message.reply_text("⚠️ دریافت تقویم موفق نبود. لطفاً بعداً امتحان کن.")
+        return MAIN_MENU
+
+    filtered = filter_events(events, today_only=False)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 تقویم امروز", callback_data="cal_today")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+
+    if not filtered:
+        await query.message.reply_text(
+            "✅ این هفته هیچ خبر مهمی (🔴) برای ارزهای اصلی وجود ندارد.",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+
+    # تقسیم به پیام‌های چندتایی اگه زیاد بود
+    chunks = []
+    current = "📆 اخبار مهم این هفته\n" + "━" * 30 + "\n\n"
+    for e in filtered:
+        block = format_event(e) + "\n"
+        if len(current) + len(block) > 4000:
+            chunks.append(current)
+            current = block
+        else:
+            current += block
+    chunks.append(current)
+
+    for i, chunk in enumerate(chunks):
+        if i == len(chunks) - 1:
+            await query.message.reply_text(chunk, reply_markup=keyboard)
+        else:
+            await query.message.reply_text(chunk)
+
+    return MAIN_MENU
+
+
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
@@ -482,6 +651,9 @@ def main():
                 CallbackQueryHandler(gold_calc_start, pattern="^gold_calc$"),
                 CallbackQueryHandler(gold_live, pattern="^gold_live$"),
                 CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
+                CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"),
+                CallbackQueryHandler(calendar_today, pattern="^cal_today$"),
+                CallbackQueryHandler(calendar_week, pattern="^cal_week$"),
             ],
             GOLD_CALC_OUNCE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_ounce),
@@ -500,6 +672,9 @@ def main():
     app.add_handler(CallbackQueryHandler(gold_calc_start, pattern="^gold_calc$"))
     app.add_handler(CallbackQueryHandler(gold_live, pattern="^gold_live$"))
     app.add_handler(CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"))
+    app.add_handler(CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"))
+    app.add_handler(CallbackQueryHandler(calendar_today, pattern="^cal_today$"))
+    app.add_handler(CallbackQueryHandler(calendar_week, pattern="^cal_week$"))
     logger.info("✅ ربات در حال اجراست...")
     app.run_polling()
 
