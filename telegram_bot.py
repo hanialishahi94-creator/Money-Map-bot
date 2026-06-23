@@ -493,19 +493,26 @@ async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
 
 
 def filter_events(events: list, today_only: bool = False) -> list:
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     result = []
-    now = datetime.now(timezone.utc)
-    today_str = now.strftime("%Y-%m-%d")
+    now_tehran = datetime.now(timezone.utc) + timedelta(hours=3, minutes=30)
+    today_str = now_tehran.strftime("%Y-%m-%d")
 
     for e in events:
-        if e.get("impact", "").lower() != "high":
+        impact = e.get("impact", "").lower()
+        if impact not in ("high", "medium"):
             continue
         if e.get("currency", "") not in TARGET_CURRENCIES:
             continue
-        date_str = e.get("date", "")
-        if today_only and not date_str.startswith(today_str):
-            continue
+        if today_only:
+            date_raw = e.get("date", "")
+            try:
+                dt_utc = datetime.fromisoformat(date_raw.replace("Z", "+00:00"))
+                dt_tehran = dt_utc + timedelta(hours=3, minutes=30)
+                if dt_tehran.strftime("%Y-%m-%d") != today_str:
+                    continue
+            except Exception:
+                continue
         result.append(e)
     return result
 
@@ -517,8 +524,9 @@ def format_event(e: dict) -> str:
     title_en = e.get("title", "")
     forecast = e.get("forecast", "") or "—"
     previous = e.get("previous", "") or "—"
+    impact = e.get("impact", "").lower()
+    impact_icon = "🔴" if impact == "high" else "🟠"
 
-    # تبدیل زمان UTC به تهران (UTC+3:30)
     date_raw = e.get("date", "")
     try:
         dt_utc = datetime.fromisoformat(date_raw.replace("Z", "+00:00"))
@@ -530,7 +538,7 @@ def format_event(e: dict) -> str:
         day_str = "—"
 
     return (
-        f"🔴 {currency_fa}\n"
+        f"{impact_icon} {currency_fa}\n"
         f"📌 {title_en}\n"
         f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
         f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
@@ -546,7 +554,7 @@ async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        "🗓 تقویم اقتصادی\n\nاخبار مهم (🔴 High Impact) ارزهای اصلی\nکدام بازه را می‌خواهی؟",
+        "🗓 تقویم اقتصادی\n\nاخبار مهم 🔴 و متوسط 🟠 ارزهای اصلی\nکدام بازه را می‌خواهی؟",
         reply_markup=keyboard,
     )
     return MAIN_MENU
