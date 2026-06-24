@@ -749,10 +749,7 @@ async def _fetch_silver_bubble() -> list | None:
     """
     import aiohttp
 
-    url = (
-        "https://fyeguwhlfqhomqpkbgxb.supabase.co/rest/v1/silver_fund_data"
-        "?select=*&order=date.desc"
-    )
+    url = "https://fyeguwhlfqhomqpkbgxb.supabase.co/rest/v1/silver_fund_data?select=*&order=date.desc"
     api_key = (
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
         ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5ZWd1d2hsZnFob21xcGtiZ3hiIiwi"
@@ -762,7 +759,9 @@ async def _fetch_silver_bubble() -> list | None:
     headers = {
         "apikey": api_key,
         "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json",
+        "Accept": "*/*",
+        "Accept-Profile": "public",
+        "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.8",
     }
 
     try:
@@ -775,6 +774,9 @@ async def _fetch_silver_bubble() -> list | None:
                     logger.error(f"silver supabase error: {await resp.text()}")
                     return None
                 rows = await resp.json(content_type=None)
+        if rows:
+            logger.info(f"silver row[0] keys: {list(rows[0].keys())}")
+            logger.info(f"silver row[0] sample: {rows[0]}")
 
         # هر ردیف آخرین داده هر صندوق را نگه می‌داریم (date.desc → اولین = جدیدترین)
         seen = set()
