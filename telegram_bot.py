@@ -744,24 +744,19 @@ async def _fetch_gold_bubble() -> list | None:
 
 async def _fetch_silver_bubble() -> list | None:
     """
-    حباب نقره از Supabase API فاندبیس.
-    endpoint: fyeguwhlfqhomqpkbgxb.supabase.co/rest/v1/silver_fund_data
+    حباب نقره از TradersArena
+    فرمت: آرایه‌ای از آرایه‌ها
+    index 1 = نام فارسی، index 15 = حباب کل
     """
     import aiohttp
+    import time
 
-    url = "https://fyeguwhlfqhomqpkbgxb.supabase.co/rest/v1/silver_fund_data?select=*&order=date.desc"
-    api_key = (
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-        ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5ZWd1d2hsZnFob21xcGtiZ3hiIiwi"
-        "cm9sZSI6ImFub24iLCJpYXQiOjE3NDcwNjcyNjUsImV4cCI6MjA2MjY0MzI2NX0"
-        ".LldFbOUTURJDOvhT57zB7-0CsGhgJyerIpuiBY_73w0"
-    )
+    url = f"https://tradersarena.ir/data/industries-stocks-csv/silver-funds?_={int(time.time()*1000)}"
     headers = {
-        "apikey": api_key,
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "*/*",
-        "Accept-Profile": "public",
-        "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://tradersarena.ir/industries/silver-funds",
+        "Accept": "application/json, text/javascript, */*",
+        "Accept-Language": "fa-IR,fa;q=0.9",
     }
 
     try:
@@ -769,45 +764,34 @@ async def _fetch_silver_bubble() -> list | None:
             async with session.get(
                 url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
-                logger.info(f"silver supabase status: {resp.status}")
+                logger.info(f"silver tradersarena status: {resp.status}")
                 if resp.status != 200:
-                    logger.error(f"silver supabase error: {await resp.text()}")
+                    logger.error(f"silver error: {await resp.text()}")
                     return None
                 rows = await resp.json(content_type=None)
-        if rows:
-            logger.info(f"silver row[0] keys: {list(rows[0].keys())}")
-            logger.info(f"silver row[0] sample: {rows[0]}")
 
-        # هر ردیف آخرین داده هر صندوق را نگه می‌داریم (date.desc → اولین = جدیدترین)
-        seen = set()
+        logger.info(f"silver rows count: {len(rows) if rows else 0}")
+
         funds = []
+        seen = set()
         for row in rows:
-            name = row.get("symbol") or row.get("fund_name") or row.get("name", "")
+            if not isinstance(row, list) or len(row) < 16:
+                continue
+            name = str(row[1]) if row[1] else ""
             if not name or name in seen:
                 continue
             seen.add(name)
-
-            # فیلد حباب کل — نام‌های احتمالی
-            bubble = (
-                row.get("bubble_total")
-                or row.get("total_bubble")
-                or row.get("bubble")
-                or row.get("hub_total")
-            )
-            if bubble is None:
-                # اگه فیلد مستقیم نبود، از bubble_price و bubble_intrinsic بساز
-                bp = row.get("bubble_price") or row.get("hub_price") or 0
-                bi = row.get("bubble_intrinsic") or row.get("hub_intrinsic") or 0
-                try:
-                    bubble = float(str(bp).replace(",","")) + float(str(bi).replace(",",""))
-                except Exception:
+            try:
+                bubble = float(row[15]) if row[15] is not None else None
+                if bubble is None:
                     continue
-
+            except Exception:
+                continue
             funds.append({
-                "name": str(name),
-                "price": str(row.get("price", "—")),
-                "bubble_price": str(row.get("bubble_price", row.get("hub_price", "—"))),
-                "bubble_intrinsic": str(row.get("bubble_intrinsic", row.get("hub_intrinsic", "—"))),
+                "name": name,
+                "price": str(row[8]) if len(row) > 8 else "—",
+                "bubble_price": str(row[5]) if len(row) > 5 else "—",
+                "bubble_intrinsic": str(row[14]) if len(row) > 14 else "—",
                 "bubble_total": str(bubble),
             })
 
@@ -815,8 +799,9 @@ async def _fetch_silver_bubble() -> list | None:
         return funds if funds else None
 
     except Exception as e:
-        logger.error(f"خطا در fetch نقره supabase: {e}")
+        logger.error(f"خطا در fetch نقره: {e}")
         return None
+
 
 
 def bubble_icon(val: str) -> str:
