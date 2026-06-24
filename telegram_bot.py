@@ -767,30 +767,64 @@ async def bubble_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
+def _prepare_persian_font():
+    """
+    فونت وزیر را آماده می‌کند و مسیر آن را برمی‌گرداند.
+    اگر فونت از قبل دانلود شده باشد، دوباره دانلود نمی‌کند.
+    """
+    import urllib.request
+    font_path = "/tmp/Vazirmatn-Regular.ttf"
+    if not os.path.exists(font_path):
+        url = (
+            "https://github.com/rastikerdar/vazirmatn/releases/download/"
+            "v33.003/Vazirmatn-Regular.ttf"
+        )
+        try:
+            urllib.request.urlretrieve(url, font_path)
+            logger.info("فونت وزیرمتن با موفقیت دانلود شد.")
+        except Exception as e:
+            logger.error(f"خطا در دانلود فونت: {e}")
+            return None
+    return font_path
+
+
+def _reshape_persian(text: str) -> str:
+    """متن فارسی را برای نمایش صحیح در matplotlib آماده می‌کند."""
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        reshaped = arabic_reshaper.reshape(text)
+        return get_display(reshaped)
+    except Exception as e:
+        logger.warning(f"خطا در reshape متن فارسی: {e}")
+        return text
+
+
 async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
     import io
 
     query = update.callback_query
     await query.answer()
     fund_type = "gold" if query.data == "bubble_gold" else "silver"
-    label = "\u0637\u0644\u0627 \U0001f947" if fund_type == "gold" else "\u0646\u0642\u0631\u0647 \U0001fa99"
-    title = "Gold Funds Bubble" if fund_type == "gold" else "Silver Funds Bubble"
+    label = "طلا 🥇" if fund_type == "gold" else "نقره 🪙"
+    title_fa = "حباب صندوق‌های طلا" if fund_type == "gold" else "حباب صندوق‌های نقره"
 
-    await query.message.reply_text(f"\u23f3 \u062f\u0631 \u062d\u0627\u0644 \u062f\u0631\u06cc\u0627\u0641\u062a \u062f\u0627\u062f\u0647 ...")
+    await query.message.reply_text("⏳ در حال دریافت داده ...")
 
     funds = await fetch_bubble_data(fund_type)
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("\U0001f504 \u0628\u0631\u0648\u0632\u0631\u0633\u0627\u0646\u06cc", callback_data=query.data)],
-        [InlineKeyboardButton("\U0001f519 \u0628\u0627\u0632\u06af\u0634\u062a", callback_data="bubble_menu")],
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data=query.data)],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="bubble_menu")],
     ])
 
     if not funds:
         await query.message.reply_text(
-            "\u26a0\ufe0f \u062f\u0631\u06cc\u0627\u0641\u062a \u062f\u0627\u062f\u0647 \u0645\u0648\u0641\u0642 \u0646\u0628\u0648\u062f. \u0644\u0637\u0641\u0627\u064b \u062f\u0642\u0627\u06cc\u0642\u06cc \u062f\u06cc\u06af\u0631 \u0627\u0645\u062a\u062d\u0627\u0646 \u06a9\u0646.",
+            "⚠️ دریافت داده موفق نبود. لطفاً دقایقی دیگر امتحان کن.",
             reply_markup=keyboard,
         )
         return MAIN_MENU
@@ -798,7 +832,12 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     names = []
     values = []
     for f in funds:
-        raw = f["bubble_total"].replace("\u066a", "").replace("%", "").replace("+", "").replace("\u2212", "-").replace("\u200e", "").strip()
+        raw = (
+            f["bubble_total"]
+            .replace("٪", "").replace("%", "")
+            .replace("+", "").replace("−", "-")
+            .replace("\u200e", "").strip()
+        )
         try:
             val = float(raw)
             names.append(f["name"])
@@ -807,13 +846,13 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
     if not names:
-        await query.message.reply_text("\u26a0\ufe0f \u062f\u0627\u062f\u0647\u200c\u0647\u0627\u06cc \u0639\u062f\u062f\u06cc \u0642\u0627\u0628\u0644 \u0646\u0645\u0627\u06cc\u0634 \u0646\u0628\u0648\u062f\u0646\u062f.", reply_markup=keyboard)
+        await query.message.reply_text("⚠️ داده‌های عددی قابل نمایش نبودند.", reply_markup=keyboard)
         return MAIN_MENU
 
-    # \u0645\u0631\u062a\u0628 \u0646\u0632\u0648\u0644\u06cc
+    # مرتب نزولی
     paired = sorted(zip(values, names), reverse=True)
     values = [v for v, _ in paired]
-    names_label = [n for _, n in paired]
+    names_raw = [n for _, n in paired]
 
     colors = []
     for v in values:
@@ -826,26 +865,47 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             colors.append("#90A4AE")
 
-    fig, ax = plt.subplots(figsize=(max(10, len(names) * 0.75), 5))
+    # آماده‌سازی فونت فارسی
+    font_path = _prepare_persian_font()
+    if font_path:
+        font_manager.fontManager.addfont(font_path)
+        persian_font = font_manager.FontProperties(fname=font_path)
+        fa_prop = {"fontproperties": persian_font}
+    else:
+        persian_font = None
+        fa_prop = {}
+
+    # reshape اسامی فارسی
+    names_label = [_reshape_persian(n) for n in names_raw]
+    title_display = _reshape_persian(title_fa)
+
+    fig, ax = plt.subplots(figsize=(max(10, len(names_label) * 0.85), 5.5))
     fig.patch.set_facecolor("#FAFAFA")
     ax.set_facecolor("#FAFAFA")
 
     bars = ax.bar(range(len(names_label)), values, color=colors, width=0.6, zorder=3)
     ax.axhline(0, color="#888", linewidth=1, linestyle="--", zorder=2)
     ax.set_xticks(range(len(names_label)))
-    ax.set_xticklabels(names_label, fontsize=9, rotation=35, ha="right")
+
+    # اعمال فونت فارسی روی tick labels
+    ax.set_xticklabels(names_label, fontsize=9, rotation=35, ha="right", **fa_prop)
 
     for bar, val in zip(bars, values):
         sign = "+" if val >= 0 else ""
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + (0.04 if val >= 0 else -0.12),
+            bar.get_height() + (0.04 if val >= 0 else -0.14),
             f"{sign}{val:.1f}%",
             ha="center", va="bottom" if val >= 0 else "top",
             fontsize=8, fontweight="bold", color="#333"
         )
 
-    ax.set_title(title, fontsize=13, fontweight="bold", color="#1a1a2e", pad=12)
+    # عنوان فارسی
+    title_kwargs = {"fontsize": 13, "fontweight": "bold", "color": "#1a1a2e", "pad": 12}
+    if persian_font:
+        title_kwargs["fontproperties"] = persian_font
+    ax.set_title(title_display, **title_kwargs)
+
     ax.set_ylabel("Bubble Total (%)", fontsize=10, color="#444")
     ax.grid(axis="y", linestyle="--", alpha=0.4, zorder=1)
     ax.spines["top"].set_visible(False)
@@ -857,7 +917,11 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buf.seek(0)
     plt.close(fig)
 
-    await query.message.reply_photo(photo=buf, caption=f"\U0001faa7 \u062d\u0628\u0627\u0628 \u0635\u0646\u062f\u0648\u0642\u200c\u0647\u0627\u06cc {label}", reply_markup=keyboard)
+    await query.message.reply_photo(
+        photo=buf,
+        caption=f"🫧 حباب صندوق‌های {label}",
+        reply_markup=keyboard,
+    )
     return MAIN_MENU
 
 def main():
