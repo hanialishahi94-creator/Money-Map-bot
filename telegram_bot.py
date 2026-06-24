@@ -647,21 +647,22 @@ async def calendar_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def fetch_bubble_data(fund_type: str) -> list | None:
     """
     fund_type: 'gold' یا 'silver'
-    برای طلا از fundbase.ir/h می‌خواند
-    برای نقره از fundbase.ir/h/silver2 می‌خواند
+    طلا: از صفحه HTML فاندبیس fundbase.ir/h (جدول استاتیک)
+    نقره: از API داخلی فاندبیس (چون صفحه HTML مجزا ندارد)
     """
     import aiohttp
     from html.parser import HTMLParser
 
     if fund_type == "gold":
-        urls_to_try = ["https://fundbase.ir/h"]
+        return await _fetch_gold_bubble()
     else:
-        # چند آدرس احتمالی برای صفحه نقره فاندبیس
-        urls_to_try = [
-            "https://fundbase.ir/h/silver",
-            "https://fundbase.ir/h/silver2",
-            "https://fundbase.ir/h?type=silver",
-        ]
+        return await _fetch_silver_bubble()
+
+
+async def _fetch_gold_bubble() -> list | None:
+    """حباب طلا از صفحه HTML فاندبیس"""
+    import aiohttp
+    from html.parser import HTMLParser
 
     class TableParser(HTMLParser):
         def __init__(self):
@@ -708,47 +709,111 @@ async def fetch_bubble_data(fund_type: str) -> list | None:
             "Accept-Language": "fa-IR,fa;q=0.9",
         }
         async with aiohttp.ClientSession() as session:
-            html = None
-            for url in urls_to_try:
-                try:
-                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            html = await resp.text(encoding="utf-8", errors="ignore")
-                            logger.info(f"fundbase OK: {url}")
-                            break
-                        else:
-                            logger.warning(f"fundbase {resp.status}: {url}")
-                except Exception as e:
-                    logger.warning(f"fundbase error {url}: {e}")
-            if not html:
-                return None
+            async with session.get(
+                "https://fundbase.ir/h",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    logger.error(f"fundbase gold status: {resp.status}")
+                    return None
+                html = await resp.text(encoding="utf-8", errors="ignore")
 
         parser = TableParser()
         parser.feed(html)
 
-        # اولین جدول با بیش از ۲ ستون که داده دارد
         funds = []
         for row in parser.rows:
             if len(row) >= 4:
                 name = row[0].strip()
-                price = row[1].strip() if len(row) > 1 else "—"
-                bubble_price = row[2].strip() if len(row) > 2 else "—"
-                bubble_intrinsic = row[3].strip() if len(row) > 3 else "—"
-                bubble_total = row[4].strip() if len(row) > 4 else "—"
-                # رد کردن هدر
                 if name in ("نماد", "صندوق", ""):
                     continue
                 funds.append({
                     "name": name,
-                    "price": price,
-                    "bubble_price": bubble_price,
-                    "bubble_intrinsic": bubble_intrinsic,
-                    "bubble_total": bubble_total,
+                    "price": row[1].strip() if len(row) > 1 else "—",
+                    "bubble_price": row[2].strip() if len(row) > 2 else "—",
+                    "bubble_intrinsic": row[3].strip() if len(row) > 3 else "—",
+                    "bubble_total": row[4].strip() if len(row) > 4 else "—",
                 })
         return funds if funds else None
 
     except Exception as e:
-        logger.error(f"خطا در scraping فاندبیس: {e}")
+        logger.error(f"خطا در scraping طلا: {e}")
+        return None
+
+
+async def _fetch_silver_bubble() -> list | None:
+    """
+    حباب نقره از Supabase API فاندبیس.
+    endpoint: fyeguwhlfqhomqpkbgxb.supabase.co/rest/v1/silver_fund_data
+    """
+    import aiohttp
+
+    url = (
+        "https://fyeguwhlfqhomqpkbgxb.supabase.co/rest/v1/silver_fund_data"
+        "?select=*&order=date.desc"
+    )
+    api_key = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+        ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5ZWd1d2hsZnFob21xcGtiZ3hiIiwi"
+        "cm9sZSI6ImFub24iLCJpYXQiOjE3NDcwNjcyNjUsImV4cCI6MjA2MjY0MzI2NX0"
+        ".LldFbOUTURJDOvhT57zB7-0CsGhgJyerIpuiBY_73w0"
+    )
+    headers = {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                logger.info(f"silver supabase status: {resp.status}")
+                if resp.status != 200:
+                    logger.error(f"silver supabase error: {await resp.text()}")
+                    return None
+                rows = await resp.json(content_type=None)
+
+        # هر ردیف آخرین داده هر صندوق را نگه می‌داریم (date.desc → اولین = جدیدترین)
+        seen = set()
+        funds = []
+        for row in rows:
+            name = row.get("symbol") or row.get("fund_name") or row.get("name", "")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+
+            # فیلد حباب کل — نام‌های احتمالی
+            bubble = (
+                row.get("bubble_total")
+                or row.get("total_bubble")
+                or row.get("bubble")
+                or row.get("hub_total")
+            )
+            if bubble is None:
+                # اگه فیلد مستقیم نبود، از bubble_price و bubble_intrinsic بساز
+                bp = row.get("bubble_price") or row.get("hub_price") or 0
+                bi = row.get("bubble_intrinsic") or row.get("hub_intrinsic") or 0
+                try:
+                    bubble = float(str(bp).replace(",","")) + float(str(bi).replace(",",""))
+                except Exception:
+                    continue
+
+            funds.append({
+                "name": str(name),
+                "price": str(row.get("price", "—")),
+                "bubble_price": str(row.get("bubble_price", row.get("hub_price", "—"))),
+                "bubble_intrinsic": str(row.get("bubble_intrinsic", row.get("hub_intrinsic", "—"))),
+                "bubble_total": str(bubble),
+            })
+
+        logger.info(f"silver funds parsed: {len(funds)}")
+        return funds if funds else None
+
+    except Exception as e:
+        logger.error(f"خطا در fetch نقره supabase: {e}")
         return None
 
 
@@ -928,21 +993,19 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # واترمارک Money Map — مرکز نمودار، کم‌رنگ
-    ax.text(
-        0.5, 0.5,
-        "Money Map",
-        transform=ax.transAxes,
-        fontsize=28,
-        color="#BBBBBB",
-        alpha=0.18,
-        ha="center", va="center",
-        rotation=30,
-        fontweight="bold",
-        zorder=0,
+    plt.tight_layout()
+
+    # برچسب گوشه بالا راست روی fig — بعد از tight_layout
+    fig.text(
+        0.99, 0.99,
+        _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"),
+        ha="right", va="top",
+        fontsize=7.5,
+        color="#999999",
+        alpha=0.8,
+        fontproperties=persian_font if persian_font else None,
     )
 
-    plt.tight_layout()
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
     buf.seek(0)
