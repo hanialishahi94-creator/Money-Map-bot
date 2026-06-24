@@ -648,12 +648,20 @@ async def fetch_bubble_data(fund_type: str) -> list | None:
     """
     fund_type: 'gold' یا 'silver'
     برای طلا از fundbase.ir/h می‌خواند
-    برای نقره از fundbase.ir/h/silver می‌خواند
+    برای نقره از fundbase.ir/h/silver2 می‌خواند
     """
     import aiohttp
     from html.parser import HTMLParser
 
-    url = "https://fundbase.ir/h" if fund_type == "gold" else "https://fundbase.ir/h/silver"
+    if fund_type == "gold":
+        urls_to_try = ["https://fundbase.ir/h"]
+    else:
+        # چند آدرس احتمالی برای صفحه نقره فاندبیس
+        urls_to_try = [
+            "https://fundbase.ir/h/silver",
+            "https://fundbase.ir/h/silver2",
+            "https://fundbase.ir/h?type=silver",
+        ]
 
     class TableParser(HTMLParser):
         def __init__(self):
@@ -700,11 +708,20 @@ async def fetch_bubble_data(fund_type: str) -> list | None:
             "Accept-Language": "fa-IR,fa;q=0.9",
         }
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    logger.error(f"fundbase status: {resp.status}")
-                    return None
-                html = await resp.text(encoding="utf-8", errors="ignore")
+            html = None
+            for url in urls_to_try:
+                try:
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            html = await resp.text(encoding="utf-8", errors="ignore")
+                            logger.info(f"fundbase OK: {url}")
+                            break
+                        else:
+                            logger.warning(f"fundbase {resp.status}: {url}")
+                except Exception as e:
+                    logger.warning(f"fundbase error {url}: {e}")
+            if not html:
+                return None
 
         parser = TableParser()
         parser.feed(html)
@@ -761,7 +778,7 @@ async def bubble_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        "🫧 حباب صندوق‌های سرمایه‌گذاری\n\nداده‌ها از فاندبیس دریافت می‌شوند.\nکدام دسته را می‌خواهی؟",
+        "🫧 حباب صندوق‌های سرمایه‌گذاری\n\nکدام دسته را می‌خواهی؟",
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -910,6 +927,20 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ax.grid(axis="y", linestyle="--", alpha=0.4, zorder=1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+
+    # واترمارک Money Map — مرکز نمودار، کم‌رنگ
+    ax.text(
+        0.5, 0.5,
+        "Money Map",
+        transform=ax.transAxes,
+        fontsize=28,
+        color="#BBBBBB",
+        alpha=0.18,
+        ha="center", va="center",
+        rotation=30,
+        fontweight="bold",
+        zorder=0,
+    )
 
     plt.tight_layout()
     buf = io.BytesIO()
