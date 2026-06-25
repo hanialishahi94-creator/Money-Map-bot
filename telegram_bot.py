@@ -1021,29 +1021,10 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== بخش VIP =====
 
 async def fetch_usdt_price() -> float | None:
-    """دریافت قیمت لحظه‌ای تتر از tgju"""
-    # امتحان چند symbol احتمالی
-    for symbol in ("tether", "usd_tether", "crypto_tether", "usdt"):
-        price = await fetch_tgju_price(symbol)
-        if price:
-            logger.info(f"USDT price from symbol '{symbol}': {price}")
-            return price
-    # fallback: دریافت مستقیم از API
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.tgju.org/v1/market/indicator/summary-table-data/crypto_tether",
-                timeout=aiohttp.ClientTimeout(total=8)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    rows = data.get("data", [])
-                    if rows:
-                        raw = str(rows[0][1]).replace(",", "")
-                        return float(raw)
-    except Exception as e:
-        logger.error(f"USDT fallback error: {e}")
+    """دریافت قیمت تتر = قیمت دلار آزاد از tgju (ریال → تومان)"""
+    price_rial = await fetch_tgju_price("price_dollar_rl")
+    if price_rial:
+        return price_rial / 10  # تبدیل ریال به تومان
     return None
 
 
@@ -1065,7 +1046,7 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
     usdt_price = await fetch_usdt_price()
     if usdt_price:
-        usdt_toman = usdt_price / 10
+        usdt_toman = usdt_price  # قبلاً تبدیل ریال→تومان در fetch انجام شده
         total_toman = int(VIP_PRICE_USDT * usdt_toman)
         price_text = f"💰 قیمت اشتراک: {VIP_PRICE_USDT} تتر\n💵 قیمت هر تتر: {usdt_toman:,.0f} تومان\n💳 مبلغ قابل پرداخت: {total_toman:,.0f} تومان"
     else:
