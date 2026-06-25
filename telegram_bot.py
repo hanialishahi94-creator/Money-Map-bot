@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 from telegram.error import TelegramError
 import logging
+import db
 
 # ===== تنظیمات =====
 TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")  # توکن ربات از متغیر محیطی (Railway -> Variables -> BOT_TOKEN)
@@ -18,108 +19,26 @@ VIP_CARD_OWNER = "هانیه علیشاهی"
 VIP_DAYS = 30
 VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
 
-# دیکشنری اعضای VIP: {user_id: expire_timestamp}
-VIP_DB_PATH = "/tmp/vip_members.json"
-
-def _load_vip_members() -> dict:
-    import json
-    try:
-        with open(VIP_DB_PATH, "r") as f:
-            return {int(k): v for k, v in json.load(f).items()}
-    except Exception:
-        return {}
-
-def _save_vip_members():
-    import json
-    try:
-        with open(VIP_DB_PATH, "w") as f:
-            json.dump({str(k): v for k, v in vip_members.items()}, f)
-    except Exception as e:
-        logger.error(f"خطا در ذخیره VIP: {e}")
-
-vip_members: dict = _load_vip_members()
-
 # ===================================================
-# ✏️ اینجا هر هفته تحلیل‌ها رو آپدیت کن
+# ✏️ تحلیل‌ها و اعضای VIP حالا از دیتابیس (db.py) خوانده می‌شوند
+# تا با هر ری‌استارت شدن بات از بین نروند. آپدیت تحلیل‌ها از طریق
+# پنل ادمین انجام می‌شود؛ این دیکشنری فقط برای سازگاری با کد قبلی نگه داشته شده.
 # ===================================================
 
-ANALYSES = {
-    "gold": """
-📅 تاریخ تحلیل: ۱ تیر ۱۴۰۴
-
-🥇 تحلیل طلا
-
-📈 روند فعلی:
-طلا در محدوده ۲۳۵۰ تا ۲۴۰۰ دلار در نوسانه. روند کلی صعودیه.
-
-🛡 حمایت‌ها:
-• حمایت اول: ۲۳۵۰ دلار
-• حمایت دوم: ۲۳۰۰ دلار
-
-🔺 مقاومت‌ها:
-• مقاومت اول: ۲۴۰۰ دلار
-• مقاومت دوم: ۲۴۵۰ دلار
-
-🔮 پیش‌بینی کوتاه‌مدت:
-در صورت شکست مقاومت ۲۴۰۰، هدف بعدی ۲۴۵۰ خواهد بود.
-
-✅ توصیه کلی:
-نگه‌داشتن پوزیشن خرید با حد ضرر زیر ۲۳۰۰ توصیه میشه.
-""",
-
-    "dollar": """
-📅 تاریخ تحلیل: ۱ تیر ۱۴۰۴
-
-💵 تحلیل دلار
-
-📈 روند فعلی:
-دلار در بازار ایران در محدوده ۶۲ تا ۶۵ هزار تومان در نوسانه.
-
-🛡 حمایت‌ها:
-• حمایت اول: ۶۲,۰۰۰ تومان
-• حمایت دوم: ۶۰,۰۰۰ تومان
-
-🔺 مقاومت‌ها:
-• مقاومت اول: ۶۵,۰۰۰ تومان
-• مقاومت دوم: ۶۸,۰۰۰ تومان
-
-🔮 پیش‌بینی کوتاه‌مدت:
-با توجه به شرایط سیاسی، احتمال نوسان بالاست.
-
-✅ توصیه کلی:
-خرید در کف‌های حمایتی با دید میان‌مدت توصیه میشه.
-""",
-
-    "bitcoin": """
-📅 تاریخ تحلیل: ۱ تیر ۱۴۰۴
-
-₿ تحلیل بیتکوین
-
-📈 روند فعلی:
-بیتکوین در محدوده ۶۵,۰۰۰ تا ۷۰,۰۰۰ دلار در نوسانه. روند میان‌مدت صعودیه.
-
-🛡 حمایت‌ها:
-• حمایت اول: ۶۵,۰۰۰ دلار
-• حمایت دوم: ۶۰,۰۰۰ دلار
-
-🔺 مقاومت‌ها:
-• مقاومت اول: ۷۰,۰۰۰ دلار
-• مقاومت دوم: ۷۵,۰۰۰ دلار
-
-🔮 پیش‌بینی کوتاه‌مدت:
-در صورت تثبیت بالای ۷۰,۰۰۰، هدف بعدی ۷۵,۰۰۰ دلاره.
-
-✅ توصیه کلی:
-خرید پله‌ای در کف‌های حمایتی با دید بلندمدت.
-"""
-}
+def _get_analysis_text(asset: str) -> str:
+    """متن کامل تحلیل (همراه تاریخ) را از دیتابیس برمی‌گرداند."""
+    row = db.get_analysis(asset)
+    if not row:
+        return "هنوز تحلیلی ثبت نشده است."
+    date_line = f"📅 تاریخ تحلیل: {row['analysis_date']}\n\n" if row.get("analysis_date") else ""
+    return date_line + (row.get("text") or "")
 
 # ===================================================
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-users = {}
+# توجه: کاربران و اعضای VIP حالا در دیتابیس (db.py) ذخیره می‌شوند، نه در حافظه.
 ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOLLAR, VIP_RECEIPT = range(7)
 
 
@@ -211,8 +130,8 @@ async def _process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, pho
     name = context.user_data["name"]
     username = update.effective_user.username or "ندارد"
 
-    users[user_id] = {"name": name, "phone": phone}
-    logger.info(f"کاربر جدید: {users[user_id]}")
+    db.upsert_user(user_id, name, phone, username)
+    logger.info(f"کاربر جدید: {name} - {phone}")
 
     # ارسال اطلاعات به گروه ادمین
     try:
@@ -285,7 +204,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
     ])
     user_id = update.effective_user.id
-    name = users.get(user_id, {}).get("name", "کاربر")
+    user_row = db.get_user(user_id)
+    name = user_row.get("name", "کاربر") if user_row else "کاربر"
     text = f"سلام {name}! 👋\nیکی از گزینه‌های زیر رو انتخاب کن:"
     if update.message:
         await update.message.reply_text(text, reply_markup=keyboard)
@@ -322,7 +242,7 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     asset_map = {"gold": "🥇 طلا", "dollar": "💵 دلار", "bitcoin": "₿ بیتکوین"}
     asset_name = asset_map[query.data]
-    analysis_text = ANALYSES[query.data]
+    analysis_text = _get_analysis_text(query.data)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
@@ -1051,12 +971,13 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = update.effective_user.id
     import time
-    if user_id in vip_members and vip_members[user_id] > time.time():
+    vip_expire = db.get_vip_expiry(user_id)
+    if vip_expire and vip_expire > time.time():
         import datetime
-        remaining_secs = vip_members[user_id] - time.time()
+        remaining_secs = vip_expire - time.time()
         remaining_days = int(remaining_secs / 86400)
         remaining_hours = int((remaining_secs % 86400) / 3600)
-        expire_dt = datetime.datetime.fromtimestamp(vip_members[user_id])
+        expire_dt = datetime.datetime.fromtimestamp(vip_expire)
         expire_str = expire_dt.strftime("%Y/%m/%d ساعت %H:%M")
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 ورود به کانال VIP", url=VIP_CHANNEL_LINK)],
@@ -1111,8 +1032,9 @@ async def vip_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def vip_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = update.effective_user
-    name = users.get(user_id, {}).get("name", user.full_name)
-    phone = users.get(user_id, {}).get("phone", "—")
+    user_row = db.get_user(user_id)
+    name = user_row.get("name", user.full_name) if user_row else user.full_name
+    phone = user_row.get("phone", "—") if user_row else "—"
     username = user.username or "ندارد"
     caption = (
         "💎 درخواست اشتراک VIP\n\n"
@@ -1147,7 +1069,7 @@ async def approve_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("فرمت اشتباه. مثال: /approve_123456789")
         return
-    vip_members[target_id] = time.time() + (VIP_DAYS * 86400)
+    db.set_vip(target_id, time.time() + (VIP_DAYS * 86400))
     try:
         invite = await context.bot.create_chat_invite_link(chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}")
         link = invite.invite_link
@@ -1191,8 +1113,9 @@ async def handle_vip_receipt_global(update: Update, context: ContextTypes.DEFAUL
     if not context.user_data.get("waiting_vip_receipt"):
         return
     context.user_data["waiting_vip_receipt"] = False
-    name = users.get(user_id, {}).get("name", user.full_name or "نامشخص")
-    phone = users.get(user_id, {}).get("phone", "—")
+    user_row = db.get_user(user_id)
+    name = user_row.get("name", user.full_name or "نامشخص") if user_row else (user.full_name or "نامشخص")
+    phone = user_row.get("phone", "—") if user_row else "—"
     username = user.username or "ندارد"
     price_info = context.user_data.get("vip_price_text", f"💰 {VIP_PRICE_USDT} تتر")
     caption = (
@@ -1230,8 +1153,7 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.effective_chat.id != ADMIN_GROUP_ID:
         return
     target_id = int(query.data.split("_")[2])
-    vip_members[target_id] = time.time() + (VIP_DAYS * 86400)
-    _save_vip_members()
+    db.set_vip(target_id, time.time() + (VIP_DAYS * 86400))
     try:
         invite = await context.bot.create_chat_invite_link(
             chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}"

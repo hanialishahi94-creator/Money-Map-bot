@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}تحلیل هفتگی{% endblock %}
+{% block content %}
+<div class="card">
+    <h3>📊 ویرایش تحلیل هفتگی</h3>
+    <p class="muted">هر متنی که اینجا برای هرکدام از سه دارایی ذخیره کنی، بعد از ذخیره فوراً همان متن داخل بات تلگرام (وقتی کاربر روی دکمه تحلیل بزند) نشان داده می‌شود.</p>
+
+    {% for asset, label in labels.items() %}
+    <div style="margin-bottom: 36px; border-top: 1px solid #eee; padding-top: 20px;">
+        <h4>{{ label }}</h4>
+        <form method="post">
+            <input type="hidden" name="asset" value="{{ asset }}">
+            <label>تاریخ تحلیل (مثلاً: ۱ تیر ۱۴۰۴)</label>
+            <input type="text" name="analysis_date" value="{{ analyses[asset].analysis_date if analyses.get(asset) else '' }}">
+            <label>متن تحلیل</label>
+            <textarea name="text">{{ analyses[asset].text if analyses.get(asset) else '' }}</textarea>
+            <button type="submit">ذخیره تحلیل {{ label }}</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}داشبورد{% endblock %}
+{% block content %}
+<div class="stat-grid">
+    <div class="stat-box">
+        <div class="num">{{ users_count }}</div>
+        <div class="label">👥 کل کاربران ثبت‌نام شده</div>
+    </div>
+    <div class="stat-box">
+        <div class="num">{{ vip_count }}</div>
+        <div class="label">💎 اعضای فعال VIP</div>
+    </div>
+</div>
+<div class="card">
+    <h3>راهنمای سریع</h3>
+    <p>از منوی بالا می‌توانی:</p>
+    <ul>
+        <li><b>کاربران</b>: لیست همه کسانی که بات را استارت کرده‌اند همراه با اسم و شماره.</li>
+        <li><b>اشتراک VIP</b>: لیست اعضای VIP و زمان باقی‌مانده اشتراک هرکدام.</li>
+        <li><b>تحلیل هفتگی</b>: ویرایش متن تحلیل طلا، دلار و بیتکوین بدون نیاز به تغییر کد.</li>
+    </ul>
+</div>
+{% endblock %}

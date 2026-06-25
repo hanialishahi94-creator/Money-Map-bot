@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}لیست کاربران{% endblock %}
+{% block content %}
+<div class="card">
+    <h3>👥 کاربرانی که بات را استارت کرده‌اند ({{ users|length }} نفر)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>اسم</th>
+                <th>شماره موبایل</th>
+                <th>یوزرنیم تلگرام</th>
+                <th>آیدی</th>
+                <th>وضعیت VIP</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.name }}</td>
+                <td>{{ u.phone }}</td>
+                <td>{{ ('@' + u.username) if u.username else '—' }}</td>
+                <td>{{ u.user_id }}</td>
+                <td>
+                    {% if u.is_vip %}
+                        <span class="badge badge-green">VIP فعال</span>
+                    {% else %}
+                        <span class="badge badge-gray">عادی</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center; color:#999;">هنوز کاربری ثبت‌نام نکرده است.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

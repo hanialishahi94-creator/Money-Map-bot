@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}پنل ادمین مانی‌مپ{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: Tahoma, "Vazirmatn", sans-serif;
+            background: #f4f5f7;
+            margin: 0;
+            color: #222;
+        }
+        .topbar {
+            background: #1a1a2e;
+            color: #fff;
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .topbar a { color: #fff; text-decoration: none; margin-right: 16px; font-size: 14px; }
+        .topbar a:hover { text-decoration: underline; }
+        .topbar .brand { font-weight: bold; font-size: 18px; }
+        .container { max-width: 980px; margin: 24px auto; padding: 0 16px; }
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 8px; text-align: right; border-bottom: 1px solid #eee; }
+        th { color: #555; font-weight: bold; background: #fafafa; }
+        tr:hover { background: #fafcff; }
+        .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .badge-green { background: #e3f8e8; color: #1e8c44; }
+        .badge-red { background: #fdeaea; color: #c0392b; }
+        .badge-gray { background: #eee; color: #777; }
+        .stat-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+        .stat-box {
+            flex: 1; min-width: 160px; background: #fff; border-radius: 10px;
+            padding: 18px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+        .stat-box .num { font-size: 28px; font-weight: bold; color: #1a1a2e; }
+        .stat-box .label { font-size: 13px; color: #777; margin-top: 4px; }
+        textarea, input[type=text], input[type=password] {
+            width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;
+            font-family: inherit; font-size: 14px;
+        }
+        textarea { min-height: 200px; resize: vertical; }
+        label { font-weight: bold; font-size: 14px; display: block; margin: 10px 0 4px; }
+        button, .btn {
+            background: #1a1a2e; color: #fff; border: none; padding: 10px 22px;
+            border-radius: 6px; font-size: 14px; cursor: pointer; margin-top: 12px;
+        }
+        button:hover, .btn:hover { background: #2d2d52; }
+        .flash { background: #fff7da; border: 1px solid #f0d86a; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+        .asset-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .asset-tabs a {
+            padding: 8px 16px; border-radius: 6px; background: #eee; color: #333;
+            text-decoration: none; font-size: 14px;
+        }
+        .asset-tabs a.active { background: #1a1a2e; color: #fff; }
+        .muted { color: #999; font-size: 12px; }
+    </style>
+</head>
+<body>
+    {% if session.get('logged_in') %}
+    <div class="topbar">
+        <div class="brand">💰 پنل ادمین مانی‌مپ</div>
+        <div>
+            <a href="{{ url_for('dashboard') }}">داشبورد</a>
+            <a href="{{ url_for('users_list') }}">کاربران</a>
+            <a href="{{ url_for('vip_list_view') }}">اشتراک VIP</a>
+            <a href="{{ url_for('analysis') }}">تحلیل هفتگی</a>
+            <a href="{{ url_for('logout') }}">خروج</a>
+        </div>
+    </div>
+    {% endif %}
+    <div class="container">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for m in messages %}
+                    <div class="flash">{{ m }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
