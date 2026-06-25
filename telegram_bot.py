@@ -1005,7 +1005,7 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logo_path = "/tmp/mmm_logo.png"
         if not os.path.exists(logo_path):
             urllib.request.urlretrieve(
-                "https://raw.githubusercontent.com/hanialishahi94-creator/Money-Map-bot/main/assets/logo.png",
+                "https://raw.githubusercontent.com/hanialishahi94-creator/Money-Map-bot/main/logo.png",
                 logo_path
             )
 
