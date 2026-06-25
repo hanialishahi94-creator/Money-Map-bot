@@ -1099,7 +1099,7 @@ async def vip_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=caption)
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]])
     await update.message.reply_text(
-        "✅ رسید شما دریافت شد!\nپس از بررسی (معمولاً کمتر از ۱ ساعت) لینک کانال برایت ارسال می‌شود.",
+        "✅ رسید شما دریافت شد!\nپس از بررسی (حداکثر ۷ ساعت) لینک کانال برایت ارسال می‌شود.",
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -1167,20 +1167,75 @@ async def handle_vip_receipt_global(update: Update, context: ContextTypes.DEFAUL
         f"👤 اسم: {name}\n"
         f"📱 شماره: {phone}\n"
         f"🔗 یوزرنیم: @{username}\n"
-        f"🆔 آیدی: {user_id}\n\n"
-        f"برای تأیید: /approve_{user_id}\n"
-        f"برای رد: /reject_{user_id}"
+        f"🆔 آیدی: {user_id}"
     )
+    admin_keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ تأیید و ارسال لینک", callback_data=f"vip_approve_{user_id}"),
+            InlineKeyboardButton("❌ رد درخواست", callback_data=f"vip_reject_{user_id}"),
+        ]
+    ])
     await context.bot.send_photo(
         chat_id=ADMIN_GROUP_ID,
         photo=update.message.photo[-1].file_id,
         caption=caption,
+        reply_markup=admin_keyboard,
     )
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]])
     await update.message.reply_text(
-        "✅ رسید شما دریافت شد!\nپس از بررسی (معمولاً کمتر از ۱ ساعت) لینک کانال برایت ارسال می‌شود.",
+        "✅ رسید شما دریافت شد!\nپس از بررسی (حداکثر ۷ ساعت) لینک کانال برایت ارسال می‌شود.",
         reply_markup=keyboard,
     )
+
+
+async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تأیید VIP با دکمه inline در گروه ادمین"""
+    import time
+    query = update.callback_query
+    await query.answer()
+    if update.effective_chat.id != ADMIN_GROUP_ID:
+        return
+    target_id = int(query.data.split("_")[2])
+    vip_members[target_id] = time.time() + (VIP_DAYS * 86400)
+    try:
+        invite = await context.bot.create_chat_invite_link(
+            chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}"
+        )
+        link = invite.invite_link
+    except Exception as e:
+        logger.error(f"خطا در ساخت لینک: {e}")
+        link = VIP_CHANNEL_LINK
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text=f"🎉 اشتراک VIP شما فعال شد!\n\n"
+                 f"🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n"
+                 f"⏳ اشتراک شما تا {VIP_DAYS} روز دیگر معتبر است.",
+        )
+        await query.edit_message_caption(
+            caption=query.message.caption + "\n\n✅ تأیید شد — لینک ارسال گردید.",
+        )
+    except Exception as e:
+        await query.edit_message_caption(caption=query.message.caption + f"\n\n⚠️ خطا: {e}")
+
+
+async def vip_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """رد VIP با دکمه inline در گروه ادمین"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_chat.id != ADMIN_GROUP_ID:
+        return
+    target_id = int(query.data.split("_")[2])
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text="❌ متأسفانه رسید پرداخت شما تأیید نشد.\nدر صورت سوال با ادمین در تماس باشید.",
+        )
+        await query.edit_message_caption(
+            caption=query.message.caption + "\n\n❌ رد شد.",
+        )
+    except Exception as e:
+        await query.edit_message_caption(caption=query.message.caption + f"\n\n⚠️ خطا: {e}")
 
 
 def main():
@@ -1238,6 +1293,8 @@ def main():
     app.add_handler(CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"))
     app.add_handler(CallbackQueryHandler(vip_menu, pattern="^vip_menu$"))
     app.add_handler(CallbackQueryHandler(vip_pay, pattern="^vip_pay$"))
+    app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
+    app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
     app.add_handler(CommandHandler("approve", approve_vip))
     app.add_handler(CommandHandler("reject", reject_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_vip))
