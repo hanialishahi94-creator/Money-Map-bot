@@ -998,13 +998,15 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         logo_img = Image.open(logo_path).convert("RGBA")
 
-        # حذف بک‌گراند مشکی خالص (فقط پیکسل‌های کاملاً سیاه)
-        data = np.array(logo_img, dtype=np.uint8)
-        r, g, b = data[:,:,0], data[:,:,1], data[:,:,2]
-        # فقط پیکسل‌هایی که هر سه کانال زیر 15 هستن (مشکی خالص)
-        mask = (r < 15) & (g < 15) & (b < 15)
-        data[:,:,3][mask] = 0
-        logo_clean = Image.fromarray(data, "RGBA")
+        # گرد کردن لوگو با حاشیه محو (vignette)
+        size = logo_img.size
+        mask_circle = Image.new("L", size, 0)
+        from PIL import ImageDraw, ImageFilter
+        draw = ImageDraw.Draw(mask_circle)
+        draw.ellipse([0, 0, size[0], size[1]], fill=255)
+        mask_circle = mask_circle.filter(ImageFilter.GaussianBlur(radius=size[0]//20))
+        logo_img.putalpha(mask_circle)
+        logo_clean = logo_img
 
         logo_arr = np.array(logo_clean)
         imagebox = OffsetImage(logo_arr, zoom=0.09)
