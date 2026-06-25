@@ -66,6 +66,11 @@ def init_db():
             )
             """
         )
+        # migration: ستون‌های یادآوری (برای دیتابیس‌های قدیمی‌تر که این ستون‌ها رو ندارن)
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(vip_members)").fetchall()}
+        for col in ("reminder_7", "reminder_3", "reminder_0"):
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE vip_members ADD COLUMN {col} INTEGER DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS analyses (
@@ -122,12 +127,27 @@ def set_vip(user_id: int, expire_at: float):
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO vip_members (user_id, expire_at)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET expire_at = excluded.expire_at
+            INSERT INTO vip_members (user_id, expire_at, reminder_7, reminder_3, reminder_0)
+            VALUES (?, ?, 0, 0, 0)
+            ON CONFLICT(user_id) DO UPDATE SET
+                expire_at = excluded.expire_at,
+                reminder_7 = 0,
+                reminder_3 = 0,
+                reminder_0 = 0
             """,
             (user_id, expire_at),
         )
+
+
+def add_vip_days(user_id: int, days: int):
+    """تمدید اشتراک: اگه هنوز اشتراک فعال داره، روزها به انتهای اشتراکش اضافه می‌شه،
+    وگرنه از همین الان حساب می‌شه. در هر حالت پرچم‌های یادآوری ریست می‌شن."""
+    now = time.time()
+    current = get_vip_expiry(user_id)
+    base = current if (current and current > now) else now
+    new_expire = base + (days * 86400)
+    set_vip(user_id, new_expire)
+    return new_expire
 
 
 def get_vip_expiry(user_id: int):
@@ -141,13 +161,22 @@ def get_all_vip():
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT v.user_id, v.expire_at, u.name, u.phone, u.username
+            SELECT v.user_id, v.expire_at, v.reminder_7, v.reminder_3, v.reminder_0,
+                   u.name, u.phone, u.username
             FROM vip_members v
             LEFT JOIN users u ON u.user_id = v.user_id
             ORDER BY v.expire_at ASC
             """
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def mark_vip_reminder_sent(user_id: int, which: str):
+    """which یکی از 'reminder_7', 'reminder_3', 'reminder_0'"""
+    if which not in ("reminder_7", "reminder_3", "reminder_0"):
+        return
+    with get_conn() as conn:
+        conn.execute(f"UPDATE vip_members SET {which} = 1 WHERE user_id = ?", (user_id,))
 
 
 def remove_vip(user_id: int):

@@ -25,6 +25,15 @@ VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
 # پنل ادمین انجام می‌شود؛ این دیکشنری فقط برای سازگاری با کد قبلی نگه داشته شده.
 # ===================================================
 
+def _format_vip_date(ts: float) -> str:
+    """تبدیل timestamp به تاریخ خوانا (میلادی) برای نمایش به کاربر"""
+    import datetime
+    try:
+        return datetime.datetime.fromtimestamp(ts).strftime("%Y/%m/%d")
+    except Exception:
+        return "نامشخص"
+
+
 def _get_analysis_text(asset: str) -> str:
     """متن کامل تحلیل (همراه تاریخ) را از دیتابیس برمی‌گرداند."""
     row = db.get_analysis(asset)
@@ -1038,6 +1047,59 @@ async def handle_non_photo_while_waiting_receipt(update: Update, context: Contex
     )
 
 
+async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
+    """جاب دوره‌ای: یادآوری ۷ روز/۳ روز/روز آخر مونده به اتمام اشتراک،
+    و حذف خودکار + پیشنهاد تمدید برای کسانی که اشتراکشان واقعاً تمام شده."""
+    import time as _time
+    now = _time.time()
+    for member in db.get_all_vip():
+        user_id = member["user_id"]
+        expire_at = member["expire_at"]
+        if not expire_at:
+            continue
+        remaining_days = (expire_at - now) / 86400
+        try:
+            if remaining_days <= 0:
+                # اشتراک واقعاً تمام شده: حذف از کانال VIP + دیتابیس + پیشنهاد تمدید
+                db.remove_vip(user_id)
+                try:
+                    await context.bot.ban_chat_member(chat_id=VIP_CHANNEL_ID, user_id=user_id)
+                    await context.bot.unban_chat_member(chat_id=VIP_CHANNEL_ID, user_id=user_id)
+                except Exception as e:
+                    logger.warning(f"خطا در حذف کاربر {user_id} از کانال VIP: {e}")
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("💎 تمدید اشتراک VIP", callback_data="vip_pay")]])
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="⛔ اشتراک VIP شما به پایان رسید و از کانال VIP خارج شدید.\n\n"
+                         "اگه می‌خوای دوباره عضو کانال VIP باشی، روی دکمه زیر بزن و اشتراکت رو تمدید کن 👇",
+                    reply_markup=keyboard,
+                )
+            elif remaining_days <= 1 and not member.get("reminder_0"):
+                db.mark_vip_reminder_sent(user_id, "reminder_0")
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"⏰ یادآوری: امروز آخرین روز اشتراک VIP شماست!\n"
+                         f"📅 تاریخ پایان: {_format_vip_date(expire_at)}\n\n"
+                         "اگه تمدید نکنی، فردا از کانال VIP حذف می‌شی.",
+                )
+            elif remaining_days <= 3 and not member.get("reminder_3"):
+                db.mark_vip_reminder_sent(user_id, "reminder_3")
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"⏰ یادآوری: ۳ روز دیگر اشتراک VIP شما تمام می‌شود.\n"
+                         f"📅 تاریخ پایان: {_format_vip_date(expire_at)}",
+                )
+            elif remaining_days <= 7 and not member.get("reminder_7"):
+                db.mark_vip_reminder_sent(user_id, "reminder_7")
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"⏰ یادآوری: یک هفته دیگر اشتراک VIP شما تمام می‌شود.\n"
+                         f"📅 تاریخ پایان: {_format_vip_date(expire_at)}",
+                )
+        except Exception as e:
+            logger.error(f"خطا در پردازش یادآوری VIP برای کاربر {user_id}: {e}")
+
+
 async def approve_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import time
     if update.effective_chat.id != ADMIN_GROUP_ID:
@@ -1048,7 +1110,7 @@ async def approve_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("فرمت اشتباه. مثال: /approve_123456789")
         return
-    db.set_vip(target_id, time.time() + (VIP_DAYS * 86400))
+    new_expire = db.add_vip_days(target_id, VIP_DAYS)
     try:
         invite = await context.bot.create_chat_invite_link(chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}")
         link = invite.invite_link
@@ -1056,9 +1118,10 @@ async def approve_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"خطا در ساخت لینک: {e}")
         link = VIP_CHANNEL_LINK
     try:
+        expire_str = _format_vip_date(new_expire)
         await context.bot.send_message(
             chat_id=target_id,
-            text=f"🎉 اشتراک VIP شما فعال شد!\n\n🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n⏳ اشتراک شما تا {VIP_DAYS} روز دیگر معتبر است.",
+            text=f"🎉 اشتراک VIP شما فعال/تمدید شد!\n\n🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n⏳ اشتراک شما تا تاریخ {expire_str} معتبر است.",
         )
         await update.message.reply_text(f"✅ کاربر {target_id} تأیید شد و لینک ارسال گردید.")
     except Exception as e:
@@ -1132,7 +1195,7 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.effective_chat.id != ADMIN_GROUP_ID:
         return
     target_id = int(query.data.split("_")[2])
-    db.set_vip(target_id, time.time() + (VIP_DAYS * 86400))
+    new_expire = db.add_vip_days(target_id, VIP_DAYS)
     try:
         invite = await context.bot.create_chat_invite_link(
             chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}"
@@ -1142,11 +1205,12 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"خطا در ساخت لینک: {e}")
         link = VIP_CHANNEL_LINK
     try:
+        expire_str = _format_vip_date(new_expire)
         await context.bot.send_message(
             chat_id=target_id,
-            text=f"🎉 اشتراک VIP شما فعال شد!\n\n"
+            text=f"🎉 اشتراک VIP شما فعال/تمدید شد!\n\n"
                  f"🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n"
-                 f"⏳ اشتراک شما تا {VIP_DAYS} روز دیگر معتبر است.",
+                 f"⏳ اشتراک شما تا تاریخ {expire_str} معتبر است.",
         )
         await query.edit_message_caption(
             caption=query.message.caption + "\n\n✅ تأیید شد — لینک ارسال گردید.",
@@ -1236,6 +1300,11 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
     # اگه به‌جای عکس، چیز دیگه‌ای فرستاد در حالی که منتظر رسیدش هستیم
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.PHOTO, handle_non_photo_while_waiting_receipt))
+    # جاب دوره‌ای بررسی اتمام اشتراک VIP (هر ۱ ساعت یک‌بار)
+    if app.job_queue is not None:
+        app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
+    else:
+        logger.warning("⚠️ job_queue فعال نیست — یادآوری‌های VIP کار نمی‌کنند. پکیج python-telegram-bot[job-queue] را نصب کنید.")
     logger.info("✅ ربات در حال اجراست...")
     app.run_polling()
 
