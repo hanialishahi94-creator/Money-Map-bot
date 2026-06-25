@@ -19,7 +19,25 @@ VIP_DAYS = 30
 VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
 
 # دیکشنری اعضای VIP: {user_id: expire_timestamp}
-vip_members: dict = {}
+VIP_DB_PATH = "/tmp/vip_members.json"
+
+def _load_vip_members() -> dict:
+    import json
+    try:
+        with open(VIP_DB_PATH, "r") as f:
+            return {int(k): v for k, v in json.load(f).items()}
+    except Exception:
+        return {}
+
+def _save_vip_members():
+    import json
+    try:
+        with open(VIP_DB_PATH, "w") as f:
+            json.dump({str(k): v for k, v in vip_members.items()}, f)
+    except Exception as e:
+        logger.error(f"خطا در ذخیره VIP: {e}")
+
+vip_members: dict = _load_vip_members()
 
 # ===================================================
 # ✏️ اینجا هر هفته تحلیل‌ها رو آپدیت کن
@@ -1034,13 +1052,21 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     import time
     if user_id in vip_members and vip_members[user_id] > time.time():
-        remaining = int((vip_members[user_id] - time.time()) / 86400)
+        import datetime
+        remaining_secs = vip_members[user_id] - time.time()
+        remaining_days = int(remaining_secs / 86400)
+        remaining_hours = int((remaining_secs % 86400) / 3600)
+        expire_dt = datetime.datetime.fromtimestamp(vip_members[user_id])
+        expire_str = expire_dt.strftime("%Y/%m/%d ساعت %H:%M")
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 ورود به کانال VIP", url=VIP_CHANNEL_LINK)],
             [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
         ])
         await query.message.reply_text(
-            f"✅ شما عضو فعال VIP هستید!\n⏳ {remaining} روز تا پایان اشتراک\n\nاز دکمه زیر وارد کانال شوید:",
+            f"✅ شما عضو فعال VIP هستید!\n\n"
+            f"⏳ زمان باقی‌مانده: {remaining_days} روز و {remaining_hours} ساعت\n"
+            f"📅 تاریخ انقضا: {expire_str}\n\n"
+            f"از دکمه زیر وارد کانال شوید:",
             reply_markup=keyboard,
         )
         return MAIN_MENU
@@ -1205,6 +1231,7 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     target_id = int(query.data.split("_")[2])
     vip_members[target_id] = time.time() + (VIP_DAYS * 86400)
+    _save_vip_members()
     try:
         invite = await context.bot.create_chat_invite_link(
             chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}"
