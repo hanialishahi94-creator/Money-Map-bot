@@ -1026,37 +1026,16 @@ async def vip_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📸 لطفاً تصویر رسید پرداخت را ارسال کن:\n\n_(بعد از بررسی، لینک کانال VIP برایت ارسال می‌شود)_",
         parse_mode="Markdown",
     )
-    return VIP_RECEIPT
-
-
-async def vip_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user = update.effective_user
-    user_row = db.get_user(user_id)
-    name = user_row.get("name", user.full_name) if user_row else user.full_name
-    phone = user_row.get("phone", "—") if user_row else "—"
-    username = user.username or "ندارد"
-    caption = (
-        "💎 درخواست اشتراک VIP\n\n"
-        f"👤 اسم: {name}\n"
-        f"📱 شماره: {phone}\n"
-        f"🔗 یوزرنیم: @{username}\n"
-        f"🆔 آیدی: {user_id}\n\n"
-        f"برای تأیید: /approve_{user_id}\n"
-        f"برای رد: /reject_{user_id}"
-    )
-    if update.message.photo:
-        await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=update.message.photo[-1].file_id, caption=caption)
-    elif update.message.document:
-        await context.bot.send_document(chat_id=ADMIN_GROUP_ID, document=update.message.document.file_id, caption=caption)
-    else:
-        await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=caption)
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]])
-    await update.message.reply_text(
-        "✅ رسید شما دریافت شد!\nپس از بررسی (حداکثر ۷ ساعت) لینک کانال برایت ارسال می‌شود.",
-        reply_markup=keyboard,
-    )
     return MAIN_MENU
+
+
+async def handle_non_photo_while_waiting_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """اگه کاربر منتظر ارسال رسیده ولی به‌جای عکس، چیز دیگه‌ای (متن/فایل/...) بفرسته"""
+    if not context.user_data.get("waiting_vip_receipt"):
+        return
+    await update.message.reply_text(
+        "📸 لطفاً رسید پرداخت را فقط به صورت «عکس» ارسال کن (نه فایل و نه متن)."
+    )
 
 
 async def approve_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1229,9 +1208,6 @@ def main():
             GOLD_CALC_DOLLAR: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_dollar),
             ],
-            VIP_RECEIPT: [
-                MessageHandler(filters.PHOTO | filters.Document.ALL | filters.TEXT & ~filters.COMMAND, vip_receipt),
-            ],
         },
         fallbacks=[CommandHandler("start", start)],
     )
@@ -1258,6 +1234,8 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_vip))
     # global handler برای دریافت رسید VIP (خارج از conversation)
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
+    # اگه به‌جای عکس، چیز دیگه‌ای فرستاد در حالی که منتظر رسیدش هستیم
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.PHOTO, handle_non_photo_while_waiting_receipt))
     logger.info("✅ ربات در حال اجراست...")
     app.run_polling()
 
