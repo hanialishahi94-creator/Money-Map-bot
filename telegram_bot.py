@@ -1068,6 +1068,7 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def vip_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    context.user_data["waiting_vip_receipt"] = True
     await query.message.reply_text(
         "📸 لطفاً تصویر رسید پرداخت را ارسال کن:\n\n_(بعد از بررسی، لینک کانال VIP برایت ارسال می‌شود)_",
         parse_mode="Markdown",
@@ -1150,6 +1151,38 @@ async def reject_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ خطا: {e}")
 
 
+async def handle_vip_receipt_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت رسید VIP از کاربر — بدون نیاز به state"""
+    user_id = update.effective_user.id
+    user = update.effective_user
+    # فقط اگه کاربر قبلاً روی دکمه پرداخت زده باشه
+    if not context.user_data.get("waiting_vip_receipt"):
+        return
+    context.user_data["waiting_vip_receipt"] = False
+    name = users.get(user_id, {}).get("name", user.full_name or "نامشخص")
+    phone = users.get(user_id, {}).get("phone", "—")
+    username = user.username or "ندارد"
+    caption = (
+        "💎 درخواست اشتراک VIP\n\n"
+        f"👤 اسم: {name}\n"
+        f"📱 شماره: {phone}\n"
+        f"🔗 یوزرنیم: @{username}\n"
+        f"🆔 آیدی: {user_id}\n\n"
+        f"برای تأیید: /approve_{user_id}\n"
+        f"برای رد: /reject_{user_id}"
+    )
+    await context.bot.send_photo(
+        chat_id=ADMIN_GROUP_ID,
+        photo=update.message.photo[-1].file_id,
+        caption=caption,
+    )
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]])
+    await update.message.reply_text(
+        "✅ رسید شما دریافت شد!\nپس از بررسی (معمولاً کمتر از ۱ ساعت) لینک کانال برایت ارسال می‌شود.",
+        reply_markup=keyboard,
+    )
+
+
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
@@ -1209,6 +1242,8 @@ def main():
     app.add_handler(CommandHandler("reject", reject_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_vip))
+    # global handler برای دریافت رسید VIP (خارج از conversation)
+    app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
     logger.info("✅ ربات در حال اجراست...")
     app.run_polling()
 
