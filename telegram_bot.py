@@ -982,22 +982,9 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     plt.tight_layout()
 
-    # متن گوشه بالا راست — پررنگ و خوانا
-    text_kwargs = dict(
-        ha="right", va="top",
-        fontsize=9,
-        color="#C8922A",
-        alpha=1.0,
-        fontweight="bold",
-    )
-    if persian_font:
-        text_kwargs["fontproperties"] = persian_font
-    fig.text(0.99, 0.99, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **text_kwargs)
-
-    # لوگو گوشه پایین چپ
+    # لوگو + متن گوشه بالا راست
     try:
         import urllib.request
-        from matplotlib.image import imread
         from matplotlib.offsetbox import OffsetImage, AnnotationBbox
         from PIL import Image
         import numpy as np
@@ -1011,24 +998,36 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         logo_img = Image.open(logo_path).convert("RGBA")
 
-        # حذف بک‌گراند مشکی
-        data = np.array(logo_img, dtype=np.float32)
-        r, g, b, a = data[:,:,0], data[:,:,1], data[:,:,2], data[:,:,3]
-        mask = (r < 30) & (g < 30) & (b < 30)
+        # حذف بک‌گراند مشکی خالص (فقط پیکسل‌های کاملاً سیاه)
+        data = np.array(logo_img, dtype=np.uint8)
+        r, g, b = data[:,:,0], data[:,:,1], data[:,:,2]
+        # فقط پیکسل‌هایی که هر سه کانال زیر 15 هستن (مشکی خالص)
+        mask = (r < 15) & (g < 15) & (b < 15)
         data[:,:,3][mask] = 0
-        logo_clean = Image.fromarray(data.astype(np.uint8), "RGBA")
+        logo_clean = Image.fromarray(data, "RGBA")
 
         logo_arr = np.array(logo_clean)
-        imagebox = OffsetImage(logo_arr, zoom=0.07)
+        imagebox = OffsetImage(logo_arr, zoom=0.09)
         ab = AnnotationBbox(
-            imagebox, (0.01, 0.01),
+            imagebox, (0.99, 0.99),
             xycoords="figure fraction",
-            box_alignment=(0, 0),
+            box_alignment=(1, 1),
             frameon=False,
         )
         fig.add_artist(ab)
+
+        # متن زیر لوگو
+        text_kwargs = dict(ha="right", va="top", fontsize=8.5, color="#C8922A", alpha=1.0, fontweight="bold")
+        if persian_font:
+            text_kwargs["fontproperties"] = persian_font
+        fig.text(0.99, 0.88, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **text_kwargs)
+
     except Exception as e:
         logger.warning(f"لوگو اضافه نشد: {e}")
+        text_kwargs = dict(ha="right", va="top", fontsize=8.5, color="#C8922A", alpha=1.0, fontweight="bold")
+        if persian_font:
+            text_kwargs["fontproperties"] = persian_font
+        fig.text(0.99, 0.99, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **text_kwargs)
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
