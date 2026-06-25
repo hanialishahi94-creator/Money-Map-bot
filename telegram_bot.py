@@ -838,21 +838,27 @@ async def bubble_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _prepare_persian_font():
     """
-    فونت وزیر را آماده می‌کند و مسیر آن را برمی‌گرداند.
+    فونت IranSans را آماده می‌کند.
     اگر فونت از قبل دانلود شده باشد، دوباره دانلود نمی‌کند.
     """
-    import urllib.request
-    font_path = "/tmp/Vazirmatn-Regular.ttf"
+    import urllib.request, zipfile
+    font_path = "/tmp/IranSans-Regular.ttf"
     if not os.path.exists(font_path):
-        url = (
-            "https://github.com/rastikerdar/vazirmatn/releases/download/"
-            "v33.003/Vazirmatn-Regular.ttf"
-        )
         try:
-            urllib.request.urlretrieve(url, font_path)
-            logger.info("فونت وزیرمتن با موفقیت دانلود شد.")
+            zip_path = "/tmp/iran-sans.zip"
+            urllib.request.urlretrieve(
+                "https://github.com/rastikerdar/iran-sans/releases/download/v5.0.3/iran-sans.zip",
+                zip_path
+            )
+            with zipfile.ZipFile(zip_path) as z:
+                for name in z.namelist():
+                    if "Regular" in name and name.endswith(".ttf") and "Condensed" not in name:
+                        with z.open(name) as src, open(font_path, "wb") as dst:
+                            dst.write(src.read())
+                        break
+            logger.info("فونت IranSans با موفقیت دانلود شد.")
         except Exception as e:
-            logger.error(f"خطا در دانلود فونت: {e}")
+            logger.error(f"خطا در دانلود فونت IranSans: {e}")
             return None
     return font_path
 
@@ -982,54 +988,11 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     plt.tight_layout()
 
-    # لوگو + متن گوشه بالا راست
-    try:
-        import urllib.request
-        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-        from PIL import Image
-        import numpy as np
-
-        logo_path = "/tmp/mmm_logo.png"
-        if not os.path.exists(logo_path):
-            urllib.request.urlretrieve(
-                "https://raw.githubusercontent.com/hanialishahi94-creator/Money-Map-bot/main/logo.png",
-                logo_path
-            )
-
-        logo_img = Image.open(logo_path).convert("RGBA")
-
-        # گرد کردن لوگو با حاشیه محو (vignette)
-        size = logo_img.size
-        mask_circle = Image.new("L", size, 0)
-        from PIL import ImageDraw, ImageFilter
-        draw = ImageDraw.Draw(mask_circle)
-        draw.ellipse([0, 0, size[0], size[1]], fill=255)
-        mask_circle = mask_circle.filter(ImageFilter.GaussianBlur(radius=size[0]//20))
-        logo_img.putalpha(mask_circle)
-        logo_clean = logo_img
-
-        logo_arr = np.array(logo_clean)
-        imagebox = OffsetImage(logo_arr, zoom=0.09)
-        ab = AnnotationBbox(
-            imagebox, (0.99, 0.99),
-            xycoords="figure fraction",
-            box_alignment=(1, 1),
-            frameon=False,
-        )
-        fig.add_artist(ab)
-
-        # متن زیر لوگو
-        text_kwargs = dict(ha="right", va="top", fontsize=8.5, color="#C8922A", alpha=1.0, fontweight="bold")
-        if persian_font:
-            text_kwargs["fontproperties"] = persian_font
-        fig.text(0.99, 0.88, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **text_kwargs)
-
-    except Exception as e:
-        logger.warning(f"لوگو اضافه نشد: {e}")
-        text_kwargs = dict(ha="right", va="top", fontsize=8.5, color="#C8922A", alpha=1.0, fontweight="bold")
-        if persian_font:
-            text_kwargs["fontproperties"] = persian_font
-        fig.text(0.99, 0.99, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **text_kwargs)
+    # متن گوشه بالا راست
+    wm_kw = dict(ha="right", va="top", fontsize=9, color="#C8922A", alpha=1.0, fontweight="bold")
+    if persian_font:
+        wm_kw["fontproperties"] = persian_font
+    fig.text(0.99, 0.99, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **wm_kw)
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
