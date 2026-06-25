@@ -982,16 +982,53 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     plt.tight_layout()
 
-    # برچسب گوشه بالا راست روی fig — بعد از tight_layout
-    fig.text(
-        0.99, 0.99,
-        _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"),
+    # متن گوشه بالا راست — پررنگ و خوانا
+    text_kwargs = dict(
         ha="right", va="top",
-        fontsize=7.5,
-        color="#999999",
-        alpha=0.8,
-        fontproperties=persian_font if persian_font else None,
+        fontsize=9,
+        color="#C8922A",
+        alpha=1.0,
+        fontweight="bold",
     )
+    if persian_font:
+        text_kwargs["fontproperties"] = persian_font
+    fig.text(0.99, 0.99, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **text_kwargs)
+
+    # لوگو گوشه پایین چپ
+    try:
+        import urllib.request
+        from matplotlib.image import imread
+        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+        from PIL import Image
+        import numpy as np
+
+        logo_path = "/tmp/mmm_logo.png"
+        if not os.path.exists(logo_path):
+            urllib.request.urlretrieve(
+                "https://raw.githubusercontent.com/hanialishahi94-creator/Money-Map-bot/main/assets/logo.png",
+                logo_path
+            )
+
+        logo_img = Image.open(logo_path).convert("RGBA")
+
+        # حذف بک‌گراند مشکی
+        data = np.array(logo_img, dtype=np.float32)
+        r, g, b, a = data[:,:,0], data[:,:,1], data[:,:,2], data[:,:,3]
+        mask = (r < 30) & (g < 30) & (b < 30)
+        data[:,:,3][mask] = 0
+        logo_clean = Image.fromarray(data.astype(np.uint8), "RGBA")
+
+        logo_arr = np.array(logo_clean)
+        imagebox = OffsetImage(logo_arr, zoom=0.07)
+        ab = AnnotationBbox(
+            imagebox, (0.01, 0.01),
+            xycoords="figure fraction",
+            box_alignment=(0, 0),
+            frameon=False,
+        )
+        fig.add_artist(ab)
+    except Exception as e:
+        logger.warning(f"لوگو اضافه نشد: {e}")
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
