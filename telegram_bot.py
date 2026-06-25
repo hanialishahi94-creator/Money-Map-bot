@@ -1022,7 +1022,29 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def fetch_usdt_price() -> float | None:
     """دریافت قیمت لحظه‌ای تتر از tgju"""
-    return await fetch_tgju_price("usd_tether")
+    # امتحان چند symbol احتمالی
+    for symbol in ("tether", "usd_tether", "crypto_tether", "usdt"):
+        price = await fetch_tgju_price(symbol)
+        if price:
+            logger.info(f"USDT price from symbol '{symbol}': {price}")
+            return price
+    # fallback: دریافت مستقیم از API
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.tgju.org/v1/market/indicator/summary-table-data/crypto_tether",
+                timeout=aiohttp.ClientTimeout(total=8)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    rows = data.get("data", [])
+                    if rows:
+                        raw = str(rows[0][1]).replace(",", "")
+                        return float(raw)
+    except Exception as e:
+        logger.error(f"USDT fallback error: {e}")
+    return None
 
 
 async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1047,7 +1069,10 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_toman = int(VIP_PRICE_USDT * usdt_toman)
         price_text = f"💰 قیمت اشتراک: {VIP_PRICE_USDT} تتر\n💵 قیمت هر تتر: {usdt_toman:,.0f} تومان\n💳 مبلغ قابل پرداخت: {total_toman:,.0f} تومان"
     else:
-        price_text = f"💰 قیمت اشتراک: {VIP_PRICE_USDT} تتر"
+        price_text = f"💰 قیمت اشتراک: {VIP_PRICE_USDT} تتر\n⚠️ برای اطلاع از معادل تومانی، قیمت روز تتر را در {VIP_PRICE_USDT} ضرب کنید"
+    # ذخیره مبلغ برای نمایش در پیام ادمین
+    context.user_data["vip_price_text"] = price_text
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 پرداخت کردم — ارسال رسید", callback_data="vip_pay")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
@@ -1162,12 +1187,14 @@ async def handle_vip_receipt_global(update: Update, context: ContextTypes.DEFAUL
     name = users.get(user_id, {}).get("name", user.full_name or "نامشخص")
     phone = users.get(user_id, {}).get("phone", "—")
     username = user.username or "ندارد"
+    price_info = context.user_data.get("vip_price_text", f"💰 {VIP_PRICE_USDT} تتر")
     caption = (
         "💎 درخواست اشتراک VIP\n\n"
         f"👤 اسم: {name}\n"
         f"📱 شماره: {phone}\n"
         f"🔗 یوزرنیم: @{username}\n"
-        f"🆔 آیدی: {user_id}"
+        f"🆔 آیدی: {user_id}\n\n"
+        f"💳 مبلغ نمایش داده شده:\n{price_info}"
     )
     admin_keyboard = InlineKeyboardMarkup([
         [
