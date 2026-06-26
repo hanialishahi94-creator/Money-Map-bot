@@ -49,7 +49,7 @@ UPLOADS_DIR = os.path.join(BASE_DIR, "static", "uploads", "analysis")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # پوشه‌ی خروجی build شده‌ی React (بعد از npm run build داخل پوشه minimapa)
-FRONTEND_DIST = os.path.normpath(os.path.join(BASE_DIR, "..", "minimapa", "dist"))
+FRONTEND_DIST = os.path.normpath(os.path.join(BASE_DIR, "dist"))
 
 
 # ===================================================================
