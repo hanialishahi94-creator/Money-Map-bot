@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: theme("colors.border");
+  }
+  html,
+  body {
+    background: radial-gradient(circle at 90% -10%, rgba(212, 175, 55, 0.07), transparent 40%),
+      radial-gradient(circle at 0% 100%, rgba(212, 175, 55, 0.04), transparent 35%), #0a0a0a;
+    min-height: 100vh;
+  }
+  ::selection {
+    background: rgba(212, 175, 55, 0.3);
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(212, 175, 55, 0.25);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(212, 175, 55, 0.45);
+  }
+}
+
+@layer components {
+  .glass {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .glass-strong {
+    background: linear-gradient(180deg, rgba(20, 20, 22, 0.85), rgba(10, 10, 11, 0.92));
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(212, 175, 55, 0.12);
+  }
+  .gold-text {
+    background: linear-gradient(90deg, #f3dd86, #d4af37 55%, #9c7a1f);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .gold-ring {
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25), 0 8px 30px rgba(212, 175, 55, 0.12);
+  }
+  .gold-glow-hover {
+    transition: box-shadow 0.35s ease, transform 0.25s ease, border-color 0.35s ease;
+  }
+  .gold-glow-hover:hover {
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.4), 0 12px 40px rgba(212, 175, 55, 0.22);
+    transform: translateY(-2px);
+  }
+  .noise-bg::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.04;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(90deg, #d4af37 0 1.5px, transparent 1.5px 42px);
+  }
+}

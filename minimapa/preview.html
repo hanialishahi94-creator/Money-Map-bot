@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Money MAP Preview</title>
+<style>
+  :root{
+    --bg:#0A0A0A; --panel:#111113; --card:#131315; --border:rgba(255,255,255,0.08);
+    --gold:#D4AF37; --gold-light:#F3DD86; --gold-dark:#9C7A1F;
+    --muted:#8C8A82; --text:#ECE9E2; --green:#2BBF7A; --red:#E5564F;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:
+      radial-gradient(circle at 90% -10%, rgba(212,175,55,0.07), transparent 40%),
+      radial-gradient(circle at 0% 100%, rgba(212,175,55,0.04), transparent 35%), #0a0a0a;
+    color:var(--text); font-family: Tahoma, Arial, sans-serif; min-height:100vh;}
+  .glass{background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015));
+    backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.08); border-radius:22px;}
+  .gold-text{background:linear-gradient(90deg,#f3dd86,#d4af37 55%,#9c7a1f);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  .sidebar{position:fixed;top:0;right:0;bottom:0;width:268px;display:flex;flex-direction:column;padding:20px;
+    background:linear-gradient(180deg,#0c0c0e,#040405);border-left:1px solid rgba(255,255,255,0.06);}
+  .brand{display:flex;flex-direction:column;align-items:center;gap:10px;padding-bottom:22px;margin-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.07);}
+  .brand img{width:64px;height:64px;filter:drop-shadow(0 4px 20px rgba(212,175,55,0.35));}
+  .brand .name{font-weight:800;font-size:14.5px;letter-spacing:.5px;}
+  .brand .sub{font-size:10.5px;color:var(--muted);margin-top:2px;}
+  .nav-label{font-size:10.5px;font-weight:700;color:rgba(255,255,255,0.3);padding:0 10px;margin:14px 0 8px;letter-spacing:.5px;}
+  .nav a{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:16px;font-size:13.5px;font-weight:500;color:rgba(255,255,255,0.55);margin-bottom:3px;text-decoration:none;}
+  .nav a.active{background:linear-gradient(90deg,var(--gold-dark),var(--gold));color:#111;font-weight:700;box-shadow:0 8px 24px rgba(212,175,55,0.25);}
+  .main{margin-right:268px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;
+    background:linear-gradient(180deg, rgba(20,20,22,0.85), rgba(10,10,11,0.92));backdrop-filter:blur(24px);
+    border-bottom:1px solid rgba(255,255,255,0.06);}
+  .search{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:10px 16px;width:280px;color:var(--muted);font-size:13px;}
+  .avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold-dark));display:flex;align-items:center;justify-content:center;font-weight:800;color:#111;box-shadow:0 0 0 1px rgba(212,175,55,.25),0 8px 30px rgba(212,175,55,.15);}
+  .admininfo{display:flex;align-items:center;gap:12px;}
+  .admininfo .name{font-size:13px;font-weight:700;}
+  .admininfo .role{font-size:11px;color:var(--muted);}
+  .content{max-width:1200px;margin:0 auto;padding:40px 32px;}
+  h1{font-size:26px;font-weight:800;margin:0 0 4px;}
+  .subtitle{color:var(--muted);font-size:14px;margin:0 0 28px;}
+  .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:24px;}
+  .stat{padding:24px;position:relative;overflow:hidden;}
+  .stat::before{content:"";position:absolute;top:0;right:0;width:4px;height:100%;background:linear-gradient(180deg,var(--gold),var(--gold-dark));}
+  .stat .icon{width:44px;height:44px;border-radius:16px;background:rgba(212,175,55,.1);display:flex;align-items:center;justify-content:center;margin-bottom:16px;box-shadow:inset 0 0 0 1px rgba(212,175,55,.2);font-size:20px;}
+  .stat .value{font-size:28px;font-weight:800;margin-bottom:6px;}
+  .stat .label{font-size:12.5px;color:var(--muted);}
+  .trend{position:absolute;top:24px;left:24px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;background:rgba(43,191,122,.1);color:var(--green);}
+  .grid3{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px;}
+  .card{padding:26px;}
+  .card-title{font-size:15px;font-weight:700;color:var(--gold-light);margin:0 0 18px;display:flex;align-items:center;gap:8px;}
+  .chart{height:200px;display:flex;align-items:flex-end;gap:8px;padding:0 4px;}
+  .bar{flex:1;background:linear-gradient(180deg, rgba(212,175,55,.55), rgba(212,175,55,.05));border-radius:8px 8px 0 0;}
+  .qlinks{display:flex;flex-direction:column;gap:10px;}
+  .qlink{display:flex;align-items:center;gap:10px;padding:13px 18px;border-radius:18px;font-size:13.5px;font-weight:700;text-decoration:none;}
+  .qlink.primary{background:linear-gradient(90deg,var(--gold-dark),var(--gold));color:#111;box-shadow:0 8px 24px rgba(212,175,55,.2);}
+  .qlink.ghost{border:1px solid rgba(156,122,31,.4);color:var(--gold-light);}
+  /* login */
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;}
+  .glow1{position:absolute;top:-10%;right:-10%;width:500px;height:500px;border-radius:50%;background:rgba(212,175,55,.1);filter:blur(120px);}
+  .glow2{position:absolute;bottom:-10%;left:-10%;width:500px;height:500px;border-radius:50%;background:rgba(212,175,55,.06);filter:blur(120px);}
+  .login-card{background:linear-gradient(180deg, rgba(20,20,22,0.85), rgba(10,10,11,0.92));backdrop-filter:blur(24px);
+    border:1px solid rgba(212,175,55,.12);border-radius:24px;width:400px;padding:38px;text-align:center;box-shadow:0 20px 60px rgba(212,175,55,.2);position:relative;z-index:2;}
+  .login-card img{width:80px;height:80px;filter:drop-shadow(0 4px 20px rgba(212,175,55,.4));margin-bottom:18px;}
+  .login-card h2{margin:0 0 4px;font-size:20px;font-weight:800;}
+  .login-card .sub{color:var(--muted);font-size:12px;margin-bottom:30px;}
+  .field{text-align:right;margin-bottom:16px;}
+  .field label{font-size:12px;font-weight:700;color:rgba(255,255,255,.7);display:block;margin-bottom:8px;}
+  .field input{width:100%;height:44px;border-radius:16px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:var(--text);padding:0 16px;font-size:13px;}
+  .btn-gold{width:100%;height:48px;border-radius:16px;background:linear-gradient(90deg,var(--gold-dark),var(--gold));color:#111;font-weight:800;font-size:14px;border:none;margin-top:6px;box-shadow:0 8px 24px rgba(212,175,55,.25);}
+  .section-title{color:#666;font-size:11px;margin:30px 0 6px;}
+</style>
+</head>
+<body>
+
+<div id="dashboard">
+  <div class="sidebar">
+    <div class="brand">
+      <img src="public/logo.svg">
+      <div class="name gold-text">MONEY MAP MARKET</div>
+      <div class="sub">پنل مدیریت Money MAP</div>
+    </div>
+    <div class="nav">
+      <div class="nav-label">عمومی</div>
+      <a class="active">📊 داشبورد</a>
+      <a>👥 کاربران</a>
+      <a>💎 اشتراک VIP</a>
+      <div class="nav-label">محتوا و ارتباط</div>
+      <a>📈 تحلیل هفتگی</a>
+      <a>📣 پیام گروهی</a>
+      <div class="nav-label">سیستم</div>
+      <a>⚙️ تنظیمات</a>
+    </div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="search">🔍 جستجو...</div>
+      <div class="admininfo">
+        <div style="text-align:right;">
+          <div class="name">ادمین مانی‌مپ</div>
+          <div class="role">مدیر سیستم</div>
+        </div>
+        <div class="avatar">A</div>
+      </div>
+    </div>
+    <div class="content">
+      <h1 class="gold-text">داشبورد مدیریت</h1>
+      <p class="subtitle">نگاهی کلی به وضعیت بات و اشتراک‌های مانی‌مپ</p>
+
+      <div class="stat-grid">
+        <div class="card stat glass"><span class="trend">+۸٫۲٪</span><div class="icon">👥</div><div class="value gold-text">۱٬۲۴۸</div><div class="label">کل کاربران ثبت‌نام شده</div></div>
+        <div class="card stat glass"><span class="trend">+۳٫۱٪</span><div class="icon">💎</div><div class="value gold-text">۳۶۲</div><div class="label">اعضای فعال VIP</div></div>
+        <div class="card stat glass"><div class="icon">💰</div><div class="value gold-text">۲۰$</div><div class="label">قیمت فعلی اشتراک</div></div>
+        <div class="card stat glass"><div class="icon">⏳</div><div class="value gold-text">۳۰</div><div class="label">مدت اشتراک (روز)</div></div>
+      </div>
+
+      <div class="grid3">
+        <div class="card glass">
+          <div class="card-title">↗ رشد کاربران هفته اخیر</div>
+          <div class="chart">
+            <div class="bar" style="height:30%"></div>
+            <div class="bar" style="height:45%"></div>
+            <div class="bar" style="height:35%"></div>
+            <div class="bar" style="height:65%"></div>
+            <div class="bar" style="height:55%"></div>
+            <div class="bar" style="height:80%"></div>
+            <div class="bar" style="height:95%"></div>
+          </div>
+        </div>
+        <div class="card glass">
+          <div class="card-title">دسترسی سریع</div>
+          <div class="qlinks">
+            <a class="qlink primary">👥 لیست کاربران</a>
+            <a class="qlink primary">💎 مدیریت VIP</a>
+            <a class="qlink ghost">📈 تحلیل هفتگی</a>
+            <a class="qlink ghost">📣 پیام گروهی</a>
+            <a class="qlink ghost">⚙️ تنظیمات</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="login" style="display:none;">
+  <div class="login-wrap">
+    <div class="glow1"></div><div class="glow2"></div>
+    <div class="login-card">
+      <img src="public/logo.svg">
+      <h2 class="gold-text">ورود به پنل مدیریت</h2>
+      <div class="sub">برای مدیریت بات مانی‌مپ مارکت وارد شو</div>
+      <div class="field"><label>نام کاربری</label><input placeholder="نام کاربری ادمین"></div>
+      <div class="field"><label>رمز عبور</label><input type="password" placeholder="••••••••"></div>
+      <button class="btn-gold">ورود به پنل</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

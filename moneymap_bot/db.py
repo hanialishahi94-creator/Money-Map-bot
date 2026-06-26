@@ -77,18 +77,33 @@ def init_db():
                 asset TEXT PRIMARY KEY,
                 analysis_date TEXT,
                 text TEXT,
+                image_path TEXT,
                 updated_at REAL
             )
             """
         )
+        # migration: ستون image_path برای دیتابیس‌های قدیمی‌تر
+        existing_analysis_cols = {row["name"] for row in conn.execute("PRAGMA table_info(analyses)").fetchall()}
+        if "image_path" not in existing_analysis_cols:
+            conn.execute("ALTER TABLE analyses ADD COLUMN image_path TEXT")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+
         # مقداردهی اولیه تحلیل‌ها در صورت خالی بودن جدول
         existing = conn.execute("SELECT asset FROM analyses").fetchall()
         existing_assets = {row["asset"] for row in existing}
         for asset, data in DEFAULT_ANALYSES.items():
             if asset not in existing_assets:
                 conn.execute(
-                    "INSERT INTO analyses (asset, analysis_date, text, updated_at) VALUES (?, ?, ?, ?)",
-                    (asset, "", data["text"], time.time()),
+                    "INSERT INTO analyses (asset, analysis_date, text, image_path, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (asset, "", data["text"], None, time.time()),
                 )
 
 
@@ -119,6 +134,43 @@ def get_all_users():
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM users ORDER BY joined_at DESC").fetchall()
         return [dict(r) for r in rows]
+
+
+def delete_user(user_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM vip_members WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+
+
+def find_user_by_phone(phone: str):
+    """جست‌وجوی کاربر با شماره موبایل (برای فعال‌سازی دستی VIP از پنل)."""
+    cleaned = (phone or "").strip()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE phone = ? OR phone = ? OR phone = ?",
+            (cleaned, cleaned.replace("+98", "0"), "+98" + cleaned.lstrip("0")),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_users_signup_counts(days: int = 7):
+    """تعداد ثبت‌نام‌های روزانه در N روز اخیر — برای نمودار رشد داشبورد."""
+    import datetime
+    now = time.time()
+    buckets = []
+    with get_conn() as conn:
+        rows = conn.execute("SELECT joined_at FROM users").fetchall()
+    timestamps = [r["joined_at"] for r in rows if r["joined_at"]]
+    for i in range(days - 1, -1, -1):
+        day_start = now - i * 86400
+        day_dt = datetime.datetime.fromtimestamp(day_start)
+        day_key = day_dt.strftime("%Y-%m-%d")
+        count = sum(
+            1 for ts in timestamps
+            if datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d") == day_key
+        )
+        buckets.append({"date": day_key, "count": count})
+    return buckets
 
 
 # ---------- VIP ----------
@@ -198,19 +250,68 @@ def get_all_analyses():
         return {r["asset"]: dict(r) for r in rows}
 
 
-def set_analysis(asset: str, analysis_date: str, text: str):
+def set_analysis(asset: str, analysis_date: str, text: str, image_path: str = None):
+    with get_conn() as conn:
+        if image_path is not None:
+            conn.execute(
+                """
+                INSERT INTO analyses (asset, analysis_date, text, image_path, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(asset) DO UPDATE SET
+                    analysis_date = excluded.analysis_date,
+                    text = excluded.text,
+                    image_path = excluded.image_path,
+                    updated_at = excluded.updated_at
+                """,
+                (asset, analysis_date, text, image_path, time.time()),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO analyses (asset, analysis_date, text, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(asset) DO UPDATE SET
+                    analysis_date = excluded.analysis_date,
+                    text = excluded.text,
+                    updated_at = excluded.updated_at
+                """,
+                (asset, analysis_date, text, time.time()),
+            )
+
+
+# ---------- تنظیمات (قیمت/مدت اشتراک VIP و ...) ----------
+
+def get_setting(key: str, default=None):
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key: str, value):
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO analyses (asset, analysis_date, text, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(asset) DO UPDATE SET
-                analysis_date = excluded.analysis_date,
-                text = excluded.text,
-                updated_at = excluded.updated_at
+            INSERT INTO settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
-            (asset, analysis_date, text, time.time()),
+            (key, str(value)),
         )
+
+
+def get_vip_price_usdt(default: float = 20):
+    val = get_setting("vip_price_usdt")
+    try:
+        return float(val) if val is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def get_vip_days(default: int = 30):
+    val = get_setting("vip_days")
+    try:
+        return int(float(val)) if val is not None else default
+    except (TypeError, ValueError):
+        return default
 
 
 # هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند

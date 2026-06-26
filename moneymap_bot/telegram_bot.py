@@ -13,11 +13,21 @@ CHANNEL_USERNAME = "@Money_Mapp"  # یوزرنیم کانال (ربات باید
 
 # ===== تنظیمات VIP =====
 VIP_CHANNEL_LINK = os.getenv("VIP_CHANNEL_LINK", "https://t.me/+6zpQXNwZD41mYWZk")
-VIP_PRICE_USDT = 20
+VIP_PRICE_USDT = 20  # مقدار پیش‌فرض — مقدار واقعی از طریق db.get_vip_price_usdt() و پنل ادمین قابل تغییر است
 VIP_CARD_NUMBER = "6219-8610-1704-6631"
 VIP_CARD_OWNER = "هانیه علیشاهی"
-VIP_DAYS = 30
+VIP_DAYS = 30  # مقدار پیش‌فرض — مقدار واقعی از طریق db.get_vip_days() و پنل ادمین قابل تغییر است
 VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
+
+
+def _vip_price_usdt() -> float:
+    """قیمت اشتراک VIP را از تنظیمات پنل ادمین می‌خواند (در صورت نبود، مقدار پیش‌فرض)."""
+    return db.get_vip_price_usdt(VIP_PRICE_USDT)
+
+
+def _vip_days() -> int:
+    """مدت اشتراک VIP را از تنظیمات پنل ادمین می‌خواند (در صورت نبود، مقدار پیش‌فرض)."""
+    return db.get_vip_days(VIP_DAYS)
 
 # ===================================================
 # ✏️ تحلیل‌ها و اعضای VIP حالا از دیتابیس (db.py) خوانده می‌شوند
@@ -1000,13 +1010,14 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard,
         )
         return MAIN_MENU
+    vip_price_usdt = _vip_price_usdt()
     usdt_price = await fetch_usdt_price()
     if usdt_price:
         usdt_toman = usdt_price  # قبلاً تبدیل ریال→تومان در fetch انجام شده
-        total_toman = int(VIP_PRICE_USDT * usdt_toman)
-        price_text = f"💰 قیمت اشتراک: {VIP_PRICE_USDT} تتر\n💵 قیمت هر تتر: {usdt_toman:,.0f} تومان\n💳 مبلغ قابل پرداخت: {total_toman:,.0f} تومان"
+        total_toman = int(vip_price_usdt * usdt_toman)
+        price_text = f"💰 قیمت اشتراک: {vip_price_usdt:g} تتر\n💵 قیمت هر تتر: {usdt_toman:,.0f} تومان\n💳 مبلغ قابل پرداخت: {total_toman:,.0f} تومان"
     else:
-        price_text = f"💰 قیمت اشتراک: {VIP_PRICE_USDT} تتر\n⚠️ برای اطلاع از معادل تومانی، قیمت روز تتر را در {VIP_PRICE_USDT} ضرب کنید"
+        price_text = f"💰 قیمت اشتراک: {vip_price_usdt:g} تتر\n⚠️ برای اطلاع از معادل تومانی، قیمت روز تتر را در {vip_price_usdt:g} ضرب کنید"
     # ذخیره مبلغ برای نمایش در پیام ادمین
     context.user_data["vip_price_text"] = price_text
 
@@ -1110,7 +1121,7 @@ async def approve_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("فرمت اشتباه. مثال: /approve_123456789")
         return
-    new_expire = db.add_vip_days(target_id, VIP_DAYS)
+    new_expire = db.add_vip_days(target_id, _vip_days())
     try:
         invite = await context.bot.create_chat_invite_link(chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}")
         link = invite.invite_link
@@ -1159,7 +1170,7 @@ async def handle_vip_receipt_global(update: Update, context: ContextTypes.DEFAUL
     name = user_row.get("name", user.full_name or "نامشخص") if user_row else (user.full_name or "نامشخص")
     phone = user_row.get("phone", "—") if user_row else "—"
     username = user.username or "ندارد"
-    price_info = context.user_data.get("vip_price_text", f"💰 {VIP_PRICE_USDT} تتر")
+    price_info = context.user_data.get("vip_price_text", f"💰 {_vip_price_usdt():g} تتر")
     caption = (
         "💎 درخواست اشتراک VIP\n\n"
         f"👤 اسم: {name}\n"
@@ -1195,7 +1206,7 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.effective_chat.id != ADMIN_GROUP_ID:
         return
     target_id = int(query.data.split("_")[2])
-    new_expire = db.add_vip_days(target_id, VIP_DAYS)
+    new_expire = db.add_vip_days(target_id, _vip_days())
     try:
         invite = await context.bot.create_chat_invite_link(
             chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-{target_id}"

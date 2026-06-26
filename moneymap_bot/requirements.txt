@@ -1,0 +1,2 @@
+Flask
+python-telegram-bot[job-queue]==21.6
