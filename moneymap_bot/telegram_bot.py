@@ -521,21 +521,32 @@ def format_event(e: dict) -> str:
     previous = e.get("previous", "") or "—"
     impact = e.get("impact", "").lower()
     impact_icon = "🔴" if impact == "high" else "🟠"
+    actual = e.get("actual", "") or ""
 
     date_raw = e.get("date", "")
+    is_published = False
     try:
         dt_utc = datetime.fromisoformat(date_raw.replace("Z", "+00:00"))
         dt_tehran = dt_utc + timedelta(hours=3, minutes=30)
         time_str = dt_tehran.strftime("%H:%M")
         day_str = dt_tehran.strftime("%Y/%m/%d")
+        is_published = dt_utc <= datetime.now(timezone.utc)
     except Exception:
         time_str = "—"
         day_str = "—"
+
+    if is_published and actual:
+        status_line = f"✅ منتشر شد  |  عدد منتشر شده: {actual}\n"
+    elif is_published:
+        status_line = "✅ منتشر شد (عدد هنوز ثبت نشده)\n"
+    else:
+        status_line = "⏳ هنوز منتشر نشده\n"
 
     return (
         f"{impact_icon} {currency_fa}\n"
         f"📌 {title_en}\n"
         f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
+        f"{status_line}"
         f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
     )
 
