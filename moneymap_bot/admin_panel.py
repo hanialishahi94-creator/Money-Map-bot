@@ -146,6 +146,8 @@ def api_activate_vip_for_user(user_id):
     data = request.get_json(silent=True) or {}
     days = int(data.get("days") or db.get_vip_days())
     new_expire = db.add_vip_days(user_id, days)
+    expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d") if new_expire else ""
+    _telegram_send_message(user_id, f"🎉 اشتراک VIP شما فعال/تمدید شد!\n📅 تاریخ انقضای جدید: {expire_str}")
     return jsonify({"ok": True, "expire_at": new_expire})
 
 
@@ -153,6 +155,7 @@ def api_activate_vip_for_user(user_id):
 @login_required
 def api_remove_vip_for_user(user_id):
     db.remove_vip(user_id)
+    _telegram_send_message(user_id, "⚠️ اشتراک VIP شما توسط مدیر حذف شد.")
     return jsonify({"ok": True})
 
 
@@ -203,6 +206,8 @@ def api_vip_quick_activate():
     if not user:
         return jsonify({"ok": False, "error": "کاربری با این شماره در دیتابیس پیدا نشد (باید قبلاً با بات /start زده باشد)."}), 404
     new_expire = db.add_vip_days(user["user_id"], days)
+    expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d") if new_expire else ""
+    _telegram_send_message(user["user_id"], f"🎉 اشتراک VIP شما فعال/تمدید شد!\n📅 تاریخ انقضای جدید: {expire_str}")
     return jsonify({"ok": True, "user_id": user["user_id"], "expire_at": new_expire})
 
 
@@ -212,6 +217,8 @@ def api_vip_extend(user_id):
     data = request.get_json(silent=True) or {}
     days = int(data.get("days") or db.get_vip_days())
     new_expire = db.add_vip_days(user_id, days)
+    expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d") if new_expire else ""
+    _telegram_send_message(user_id, f"🎉 اشتراک VIP شما فعال/تمدید شد!\n📅 تاریخ انقضای جدید: {expire_str}")
     return jsonify({"ok": True, "expire_at": new_expire})
 
 
@@ -219,6 +226,7 @@ def api_vip_extend(user_id):
 @login_required
 def api_vip_remove(user_id):
     db.remove_vip(user_id)
+    _telegram_send_message(user_id, "⚠️ اشتراک VIP شما توسط مدیر حذف شد.")
     return jsonify({"ok": True})
 
 
