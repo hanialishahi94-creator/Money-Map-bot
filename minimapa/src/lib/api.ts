@@ -75,15 +75,16 @@ export const api = {
   deleteUser: (userId: number) =>
     request<{ ok: boolean }>(`/users/${userId}`, { method: "DELETE" }),
 
-  activateVipForUser: (userId: number, days?: number) =>
+  activateVipForUser: (userId: number, days?: number, notify?: boolean) =>
     request<{ ok: boolean; expire_at: number }>(
       `/users/${userId}/activate-vip`,
-      { method: "POST", body: JSON.stringify({ days }) }
+      { method: "POST", body: JSON.stringify({ days, notify }) }
     ),
 
-  removeVipForUser: (userId: number) =>
+  removeVipForUser: (userId: number, notify?: boolean) =>
     request<{ ok: boolean }>(`/users/${userId}/remove-vip`, {
       method: "POST",
+      body: JSON.stringify({ notify }),
     }),
 
   vipList: () =>
@@ -101,20 +102,23 @@ export const api = {
       }[];
     }>("/vip"),
 
-  vipQuickActivate: (phone: string, days: number) =>
+  vipQuickActivate: (phone: string, days: number, notify?: boolean) =>
     request<{ ok: boolean; user_id?: number; expire_at?: number; error?: string }>(
       "/vip/activate",
-      { method: "POST", body: JSON.stringify({ phone, days }) }
+      { method: "POST", body: JSON.stringify({ phone, days, notify }) }
     ),
 
-  vipExtend: (userId: number, days: number) =>
+  vipExtend: (userId: number, days: number, notify?: boolean) =>
     request<{ ok: boolean; expire_at: number }>(`/vip/${userId}/extend`, {
       method: "POST",
-      body: JSON.stringify({ days }),
+      body: JSON.stringify({ days, notify }),
     }),
 
-  vipRemove: (userId: number) =>
-    request<{ ok: boolean }>(`/vip/${userId}/remove`, { method: "POST" }),
+  vipRemove: (userId: number, notify?: boolean) =>
+    request<{ ok: boolean }>(`/vip/${userId}/remove`, {
+      method: "POST",
+      body: JSON.stringify({ notify }),
+    }),
 
   analyses: () =>
     request<{

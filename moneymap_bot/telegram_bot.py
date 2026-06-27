@@ -310,7 +310,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
-        [InlineKeyboardButton("👥 معرفی دوستان (رایگان شو!)", callback_data="referral_menu")],
     ])
     user_id = update.effective_user.id
     user_row = db.get_user(user_id)

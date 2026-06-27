@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Gem, Plus, RefreshCcw, Trash2, Loader2 } from "lucide-react";
+import { Gem, Plus, RefreshCcw, Trash2, Loader2, Bell, BellOff } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -26,10 +26,12 @@ export default function VipPage() {
 
   const [phone, setPhone] = useState("");
   const [days, setDays] = useState("");
+  const [quickNotify, setQuickNotify] = useState(true);
   const [quickError, setQuickError] = useState("");
   const [quickLoading, setQuickLoading] = useState(false);
 
   const [extendDays, setExtendDays] = useState<Record<number, string>>({});
+  const [notify, setNotify] = useState<Record<number, boolean>>({});
 
   async function load() {
     setLoading(true);
@@ -55,7 +57,7 @@ export default function VipPage() {
     }
     setQuickLoading(true);
     try {
-      const res = await api.vipQuickActivate(phone.trim(), days ? parseInt(days, 10) : 0);
+      const res = await api.vipQuickActivate(phone.trim(), days ? parseInt(days, 10) : 0, quickNotify);
       if (res.ok) {
         setPhone("");
         setDays("");
@@ -74,7 +76,7 @@ export default function VipPage() {
     setBusyId(userId);
     try {
       const d = extendDays[userId] ? parseInt(extendDays[userId], 10) : 30;
-      await api.vipExtend(userId, d);
+      await api.vipExtend(userId, d, notify[userId] ?? true);
       await load();
     } finally {
       setBusyId(null);
@@ -84,7 +86,7 @@ export default function VipPage() {
   async function handleRemove(userId: number) {
     setBusyId(userId);
     try {
-      await api.vipRemove(userId);
+      await api.vipRemove(userId, notify[userId] ?? true);
       await load();
     } finally {
       setBusyId(null);
@@ -116,6 +118,15 @@ export default function VipPage() {
             {quickLoading ? <Loader2 size={15} className="animate-spin" /> : <Gem size={15} />} فعال‌سازی / تمدید
           </Button>
         </div>
+        <label className="flex items-center gap-2 mt-3 text-xs text-white/70 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={quickNotify}
+            onChange={(e) => setQuickNotify(e.target.checked)}
+            className="accent-amber-500"
+          />
+          {quickNotify ? <Bell size={13} /> : <BellOff size={13} />} به کاربر توی تلگرام پیام بده که اشتراکش فعال/تمدید شد
+        </label>
         {quickError && <div className="text-red text-xs mt-3">{quickError}</div>}
       </Card>
 
@@ -156,19 +167,30 @@ export default function VipPage() {
                   <td className="py-3.5 text-muted">{v.is_active ? `${v.days} روز و ${v.hours} ساعت` : "—"}</td>
                   <td className="py-3.5 text-muted">{v.expire_str}</td>
                   <td className="py-3.5">
-                    <div className="flex gap-2">
-                      <Input
-                        value={extendDays[v.user_id] ?? ""}
-                        onChange={(e) => setExtendDays((s) => ({ ...s, [v.user_id]: e.target.value }))}
-                        placeholder="30"
-                        className="w-16 h-9 px-2 text-center"
-                      />
-                      <Button size="sm" disabled={busyId === v.user_id} onClick={() => handleExtend(v.user_id)}>
-                        {busyId === v.user_id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCcw size={13} />} تمدید
-                      </Button>
-                      <Button size="sm" variant="danger" disabled={busyId === v.user_id} onClick={() => handleRemove(v.user_id)}>
-                        <Trash2 size={13} />
-                      </Button>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <Input
+                          value={extendDays[v.user_id] ?? ""}
+                          onChange={(e) => setExtendDays((s) => ({ ...s, [v.user_id]: e.target.value }))}
+                          placeholder="30"
+                          className="w-16 h-9 px-2 text-center"
+                        />
+                        <Button size="sm" disabled={busyId === v.user_id} onClick={() => handleExtend(v.user_id)}>
+                          {busyId === v.user_id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCcw size={13} />} تمدید
+                        </Button>
+                        <Button size="sm" variant="danger" disabled={busyId === v.user_id} onClick={() => handleRemove(v.user_id)}>
+                          <Trash2 size={13} />
+                        </Button>
+                      </div>
+                      <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={notify[v.user_id] ?? true}
+                          onChange={(e) => setNotify((s) => ({ ...s, [v.user_id]: e.target.checked }))}
+                          className="accent-amber-500"
+                        />
+                        {(notify[v.user_id] ?? true) ? <Bell size={11} /> : <BellOff size={11} />} اطلاع به کاربر
+                      </label>
                     </div>
                   </td>
                 </motion.tr>

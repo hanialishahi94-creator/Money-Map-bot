@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Search, Trash2, Gem, Loader2 } from "lucide-react";
+import { Search, Trash2, Gem, Loader2, Bell, BellOff } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [notify, setNotify] = useState<Record<number, boolean>>({});
 
   async function load() {
     setLoading(true);
@@ -42,7 +43,7 @@ export default function UsersPage() {
   async function handleActivate(userId: number) {
     setBusyId(userId);
     try {
-      await api.activateVipForUser(userId);
+      await api.activateVipForUser(userId, undefined, notify[userId] ?? true);
       await load();
     } finally {
       setBusyId(null);
@@ -52,7 +53,7 @@ export default function UsersPage() {
   async function handleRemoveVip(userId: number) {
     setBusyId(userId);
     try {
-      await api.removeVipForUser(userId);
+      await api.removeVipForUser(userId, notify[userId] ?? true);
       await load();
     } finally {
       setBusyId(null);
@@ -148,19 +149,30 @@ export default function UsersPage() {
                     {u.is_vip ? <Badge variant="green" dot>VIP فعال</Badge> : <Badge variant="gray">عادی</Badge>}
                   </td>
                   <td className="py-3.5">
-                    <div className="flex gap-2">
-                      {u.is_vip ? (
-                        <Button size="sm" variant="danger" disabled={busyId === u.user_id} onClick={() => handleRemoveVip(u.user_id)}>
-                          {busyId === u.user_id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} حذف VIP
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        {u.is_vip ? (
+                          <Button size="sm" variant="danger" disabled={busyId === u.user_id} onClick={() => handleRemoveVip(u.user_id)}>
+                            {busyId === u.user_id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} حذف VIP
+                          </Button>
+                        ) : (
+                          <Button size="sm" disabled={busyId === u.user_id} onClick={() => handleActivate(u.user_id)}>
+                            {busyId === u.user_id ? <Loader2 size={13} className="animate-spin" /> : <Gem size={13} />} فعال‌سازی
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" disabled={busyId === u.user_id} onClick={() => handleDelete(u.user_id)}>
+                          <Trash2 size={13} />
                         </Button>
-                      ) : (
-                        <Button size="sm" disabled={busyId === u.user_id} onClick={() => handleActivate(u.user_id)}>
-                          {busyId === u.user_id ? <Loader2 size={13} className="animate-spin" /> : <Gem size={13} />} فعال‌سازی
-                        </Button>
-                      )}
-                      <Button size="sm" variant="outline" disabled={busyId === u.user_id} onClick={() => handleDelete(u.user_id)}>
-                        <Trash2 size={13} />
-                      </Button>
+                      </div>
+                      <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={notify[u.user_id] ?? true}
+                          onChange={(e) => setNotify((s) => ({ ...s, [u.user_id]: e.target.checked }))}
+                          className="accent-amber-500"
+                        />
+                        {(notify[u.user_id] ?? true) ? <Bell size={11} /> : <BellOff size={11} />} اطلاع به کاربر
+                      </label>
                     </div>
                   </td>
                 </motion.tr>
