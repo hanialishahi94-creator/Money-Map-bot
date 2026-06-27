@@ -302,7 +302,10 @@ async def fetch_tgju_price(symbol: str) -> float | None:
 
 async def fetch_gold18_market_price() -> float | None:
     """قیمت بازار واقعی هر گرم طلای ۱۸ عیار (برای محاسبه درصد حباب)"""
-    return await fetch_tgju_price("geram18")
+    price = await fetch_tgju_price("geram18")
+    if price is not None:
+        return price / 10
+    return None
 
 
 def calc_gold18(ounce_usd: float, dollar_toman: float) -> tuple[float, float]:
@@ -326,11 +329,13 @@ def gold_result_text(ounce_usd: float, dollar_toman: float, source: str, market_
         bubble_pct = (market_price - gram_toman) / gram_toman * 100
         sign = "+" if bubble_pct >= 0 else ""
         emoji = "🔴" if bubble_pct > 0 else ("🟢" if bubble_pct < 0 else "⚪")
-        text += (
-            f"\n{'─' * 32}\n"
-            f"🏷️ قیمت بازار طلا: {market_price:,.0f} تومان\n"
-            f"{emoji} حباب: {sign}{bubble_pct:.1f}٪"
-        )
+        if bubble_pct > 0.5:
+            bubble_sentence = f"الان طلا توی بازار حدود {bubble_pct:.1f}٪ گرون‌تر از ارزش واقعیشه."
+        elif bubble_pct < -0.5:
+            bubble_sentence = f"الان طلا توی بازار حدود {abs(bubble_pct):.1f}٪ ارزون‌تر از ارزش واقعیشه."
+        else:
+            bubble_sentence = "الان قیمت طلا توی بازار تقریباً با ارزش واقعیش برابره."
+        text += f"\n🏷️ قیمت بازار طلا: {market_price:,.0f} تومان\n💬 {bubble_sentence}"
     return text
 
 
