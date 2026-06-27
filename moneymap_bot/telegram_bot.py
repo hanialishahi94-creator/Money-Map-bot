@@ -487,6 +487,9 @@ async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
         return None
 
 
+CURRENCY_PRIORITY = {c: i for i, c in enumerate(CURRENCY_FA.keys())}
+
+
 def filter_events(events: list, today_only: bool = False) -> list:
     from datetime import datetime, timezone, timedelta
     result = []
@@ -495,7 +498,7 @@ def filter_events(events: list, today_only: bool = False) -> list:
 
     for e in events:
         impact = e.get("impact", "").lower()
-        if impact not in ("high", "medium"):
+        if impact != "high":
             continue
         if e.get("country", "") not in TARGET_CURRENCIES:
             continue
@@ -509,7 +512,28 @@ def filter_events(events: list, today_only: bool = False) -> list:
             except Exception:
                 continue
         result.append(e)
+
+    result.sort(key=lambda e: CURRENCY_PRIORITY.get(e.get("country", ""), 99))
     return result
+
+
+def get_asset_impact(title: str, currency: str) -> str:
+    t = title.lower()
+    if any(k in t for k in ["cpi", "inflation", "pce"]):
+        return "🥇 طلا، 💵 دلار"
+    if any(k in t for k in ["non-farm", "nonfarm", "employment", "unemployment", "payroll", "jobless"]):
+        return "💵 دلار، 🥇 طلا"
+    if any(k in t for k in ["interest rate", "fomc", "rate statement", "rate decision", "fed"]):
+        return "💵 دلار، 🥇 طلا، ₿ بیت‌کوین"
+    if any(k in t for k in ["gdp"]):
+        return "💱 ارز ملی، 📈 بورس"
+    if any(k in t for k in ["retail sales"]):
+        return "💵 دلار، 📈 بورس"
+    if any(k in t for k in ["pmi", "manufacturing", "ism"]):
+        return "💱 ارز ملی، 📈 بورس"
+    if any(k in t for k in ["speech", "speaks", "testimony", "press conference"]):
+        return "💵 دلار، ₿ بیت‌کوین"
+    return "💱 ارز مربوطه و بازارهای هم‌سو"
 
 
 def format_event(e: dict) -> str:
@@ -535,12 +559,7 @@ def format_event(e: dict) -> str:
         time_str = "—"
         day_str = "—"
 
-    if is_published and actual:
-        status_line = f"✅ منتشر شد  |  عدد منتشر شده: {actual}\n"
-    elif is_published:
-        status_line = "✅ منتشر شد (عدد هنوز ثبت نشده)\n"
-    else:
-        status_line = "⏳ هنوز منتشر نشده\n"
+    status_line = f"✅ منتشر شد: {actual}\n" if (is_published and actual) else ""
 
     return (
         f"{impact_icon} {currency_fa}\n"
