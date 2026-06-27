@@ -1050,14 +1050,28 @@ async def vip_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_non_photo_while_waiting_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """اگه کاربر منتظر ارسال رسیده ولی به‌جای عکس، چیز دیگه‌ای (متن/فایل/...) بفرسته"""
-    if not context.user_data.get("waiting_vip_receipt"):
+    """
+    این تابع آخرین هندلر فعال (fallback) برای پیام‌های متنی/فایلی خصوصی است.
+    دو حالت را پوشش می‌دهد:
+    ۱) کاربر منتظر ارسال رسید VIP بوده ولی به‌جای عکس چیز دیگری فرستاده.
+    ۲) هیچ هندلر دیگری این پیام را نگرفته (مثلاً به‌خاطر گم‌شدن وضعیت گفتگو بعد از ریستارت سرور،
+       یا پیام کاملاً نامربوط) — به‌جای سکوت کامل، باید راهنمایی شود.
+    """
+    if context.user_data.get("waiting_vip_receipt"):
+        await update.message.reply_text(
+            "📸 لطفاً رسید پرداخت را فقط به صورت «عکس» ارسال کن (نه فایل و نه متن)."
+        )
         return
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="menu")],
+    ])
     await update.message.reply_text(
-        "📸 لطفاً رسید پرداخت را فقط به صورت «عکس» ارسال کن (نه فایل و نه متن)."
+        "🤔 متوجه این پیام نشدم.\n\n"
+        "اگه وسط یه مرحله گیر کردی (مثلاً محاسبه‌گر طلا)، می‌تونی دوباره از اول شروع کنی: دستور /start رو بزن.\n"
+        "یا از دکمه‌ی زیر برای رفتن به منوی اصلی استفاده کن 👇",
+        reply_markup=keyboard,
     )
-
-
 async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
     """جاب دوره‌ای: یادآوری ۷ روز/۳ روز/روز آخر مونده به اتمام اشتراک،
     و حذف خودکار + پیشنهاد تمدید برای کسانی که اشتراکشان واقعاً تمام شده."""
