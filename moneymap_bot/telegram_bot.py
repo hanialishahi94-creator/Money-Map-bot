@@ -1,7 +1,7 @@
 import os
 import re
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes, PicklePersistence
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 from telegram.error import TelegramError
 import logging
 import db
@@ -73,6 +73,16 @@ async def is_member_of_channel(bot, user_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # هر بار /start زده بشه، از اول شروع می‌کنیم (اسم و شماره دوباره پرسیده می‌شه)
+    # اگه کاربر از طریق لینک رفرال (معرفی دوستان) وارد شده باشه، آیدی معرف رو موقتاً ذخیره کن
+    if context.args:
+        arg = context.args[0]
+        if arg.startswith("ref_"):
+            try:
+                referrer_id = int(arg[4:])
+                if referrer_id != update.effective_user.id:
+                    context.user_data["referrer_id"] = referrer_id
+            except ValueError:
+                pass
     await update.message.reply_text(
         "👋 سلام! به ربات تحلیل بازار خوش اومدی.\n\n"
         "لطفاً اسمت رو بنویس:"
@@ -152,6 +162,12 @@ async def _process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, pho
     db.upsert_user(user_id, name, phone, username)
     logger.info(f"کاربر جدید: {name} - {phone}")
 
+    # اگه از طریق لینک رفرال وارد شده، معرفش رو ثبت کن و چک کن جایزه‌ای بهش تعلق می‌گیره یا نه
+    referrer_id = context.user_data.get("referrer_id")
+    if referrer_id:
+        db.set_referrer(user_id, referrer_id)
+        await _check_referral_reward(referrer_id, context)
+
     # ارسال اطلاعات به گروه ادمین
     try:
         await context.bot.send_message(
@@ -175,6 +191,49 @@ async def _process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, pho
     # حالا چک کن عضو کانال هست یا نه
     await ask_to_join_channel(update, context)
     return CHECK_MEMBERSHIP
+
+
+# ===== سیستم رفرال: چک و اعطای جایزه عضویت رایگان =====
+async def _check_referral_reward(referrer_id: int, context: ContextTypes.DEFAULT_TYPE):
+    """بعد از ثبت‌نام موفق یه کاربر جدید (با شماره موبایل)، چک می‌کنه آیا معرفش
+    به تعداد لازم (مثلاً ۵ نفر) رسیده یا نه. اگه رسیده و کمپین رفرال فعال باشه،
+    عضویت VIP/کانال سیگنال رایگان براش فعال می‌کنه."""
+    if not db.is_referral_enabled():
+        return
+
+    required = db.get_referral_required_count()
+    confirmed = db.get_confirmed_referral_count(referrer_id)
+    rewards_given = db.get_referral_rewards_given(referrer_id)
+    earned_batches = confirmed // required
+
+    if earned_batches <= rewards_given:
+        return  # هنوز جایزه جدیدی تعلق نگرفته
+
+    new_batches = earned_batches - rewards_given
+    for _ in range(new_batches):
+        db.increment_referral_rewards_given(referrer_id)
+
+    new_expire = db.add_vip_days(referrer_id, _vip_days() * new_batches)
+
+    try:
+        invite = await context.bot.create_chat_invite_link(
+            chat_id=VIP_CHANNEL_ID, member_limit=1, name=f"VIP-REF-{referrer_id}"
+        )
+        link = invite.invite_link
+    except Exception as e:
+        logger.error(f"خطا در ساخت لینک رفرال: {e}")
+        link = VIP_CHANNEL_LINK
+
+    try:
+        expire_str = _format_vip_date(new_expire)
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text=f"🎉 تبریک! شما {required} نفر رو با موفقیت معرفی کردی و عضویت کانال سیگنال برات رایگان فعال شد!\n\n"
+                 f"🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n"
+                 f"⏳ این اشتراک تا تاریخ {expire_str} معتبر است.",
+        )
+    except Exception as e:
+        logger.error(f"خطا در اطلاع‌رسانی جایزه رفرال به {referrer_id}: {e}")
 
 
 # ===== درخواست عضویت در کانال =====
@@ -221,6 +280,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
+        [InlineKeyboardButton("👥 معرفی دوستان (رایگان شو!)", callback_data="referral_menu")],
     ])
     user_id = update.effective_user.id
     user_row = db.get_user(user_id)
@@ -230,6 +290,43 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard)
     elif update.callback_query:
         await update.callback_query.message.reply_text(text, reply_markup=keyboard)
+
+
+async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش لینک رفرال شخصی کاربر و وضعیت پیشرفتش"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    bot_username = (await context.bot.get_me()).username
+    referral_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
+    ])
+
+    if not db.is_referral_enabled():
+        await query.message.reply_text(
+            "در حال حاضر کمپین «معرفی دوستان» فعال نیست.",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+
+    required = db.get_referral_required_count()
+    confirmed = db.get_confirmed_referral_count(user_id)
+    progress = confirmed % required
+    rewards_given = db.get_referral_rewards_given(user_id)
+
+    text = (
+        "👥 معرفی دوستان\n\n"
+        f"اگه {required} نفر رو با لینک زیر به بات معرفی کنی و اونا شماره موبایلشون رو ثبت کنن،\n"
+        f"عضویت کانال سیگنال به‌صورت رایگان برات فعال می‌شه! 🎉\n\n"
+        f"🔗 لینک اختصاصی تو:\n{referral_link}\n\n"
+        f"📊 پیشرفت فعلی: {progress}/{required} نفر\n"
+        f"🎁 تعداد جوایزی که تا الان گرفتی: {rewards_given}"
+    )
+    await query.message.reply_text(text, reply_markup=keyboard)
+    return MAIN_MENU
 
 
 async def show_analysis_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -282,28 +379,21 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== گرفتن قیمت لحظه‌ای از tgju =====
 async def fetch_tgju_price(symbol: str) -> float | None:
     import aiohttp
-    import re
-    url = f"https://www.tgju.org/profile/{symbol}"
+    url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15), headers=headers) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return None
-                html = await resp.text()
-                match = re.search(r'data-col="info\.last_trade\.PDrCotVal">([\d,]+)', html)
-                if match:
-                    return float(match.group(1).replace(",", ""))
+                data = await resp.json()
+                # مقدار قیمت در فیلد "p" یا "price" هست
+                rows = data.get("data", [])
+                if rows:
+                    raw = rows[0][1]  # ستون دوم = قیمت فعلی
+                    price = float(str(raw).replace(",", ""))
+                    return price
     except Exception as e:
         logger.error(f"خطا در دریافت قیمت {symbol}: {e}")
-    return None
-
-
-async def fetch_gold18_market_price() -> float | None:
-    """قیمت بازار واقعی هر گرم طلای ۱۸ عیار (برای محاسبه درصد حباب)"""
-    price = await fetch_tgju_price("geram18")
-    if price is not None:
-        return price / 10
     return None
 
 
@@ -313,29 +403,17 @@ def calc_gold18(ounce_usd: float, dollar_toman: float) -> tuple[float, float]:
     return gram_usd, gram_toman
 
 
-def gold_result_text(ounce_usd: float, dollar_toman: float, source: str, market_price: float | None = None) -> str:
+def gold_result_text(ounce_usd: float, dollar_toman: float, source: str) -> str:
     gram_usd, gram_toman = calc_gold18(ounce_usd, dollar_toman)
-    text = (
+    return (
         f"📊 ارزش واقعی طلای ۱۸ عیار {source}\n"
         f"{'─' * 32}\n"
         f"🔸 اونس جهانی: {ounce_usd:,.2f} دلار\n"
         f"🔸 نرخ دلار (بازار آزاد): {dollar_toman:,.0f} تومان\n"
         f"{'─' * 32}\n"
-        f"💰 ارزش واقعی هر گرم طلای ۱۸ عیار:\n"
+        f"💰 ارزش هر گرم طلای ۱۸ عیار:\n"
         f"   {gram_toman:,.0f} تومان"
     )
-    if market_price:
-        bubble_pct = (market_price - gram_toman) / gram_toman * 100
-        sign = "+" if bubble_pct >= 0 else ""
-        emoji = "🔴" if bubble_pct > 0 else ("🟢" if bubble_pct < 0 else "⚪")
-        if bubble_pct > 0.5:
-            bubble_sentence = f"الان طلا توی بازار حدود {bubble_pct:.1f}٪ گرون‌تر از ارزش واقعیشه."
-        elif bubble_pct < -0.5:
-            bubble_sentence = f"الان طلا توی بازار حدود {abs(bubble_pct):.1f}٪ ارزون‌تر از ارزش واقعیشه."
-        else:
-            bubble_sentence = "الان قیمت طلا توی بازار تقریباً با ارزش واقعیش برابره."
-        text += f"\n🏷️ قیمت بازار طلا: {market_price:,.0f} تومان\n💬 {bubble_sentence}"
-    return text
 
 
 # ===== ماشین حساب طلای ۱۸ عیار =====
@@ -370,7 +448,6 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
 
     dollar_toman = dollar / 10
-    market_price = await fetch_gold18_market_price()
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی مجدد", callback_data="gold_live")],
@@ -378,7 +455,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        gold_result_text(ounce, dollar_toman, "لحظه‌ای", market_price),
+        gold_result_text(ounce, dollar_toman, "لحظه‌ای"),
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -440,14 +517,13 @@ async def gold_calc_get_dollar(update: Update, context: ContextTypes.DEFAULT_TYP
         return GOLD_CALC_DOLLAR
 
     ounce_price = context.user_data["ounce_price"]
-    market_price = await fetch_gold18_market_price()
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 محاسبه مجدد", callback_data="gold_custom")],
         [InlineKeyboardButton("📡 مشاهده قیمت لحظه‌ای", callback_data="gold_live")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await update.message.reply_text(
-        gold_result_text(ounce_price, dollar_rate, "با مفروضات شما", market_price),
+        gold_result_text(ounce_price, dollar_rate, "با مفروضات شما"),
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -486,9 +562,6 @@ async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
         return None
 
 
-CURRENCY_PRIORITY = {c: i for i, c in enumerate(CURRENCY_FA.keys())}
-
-
 def filter_events(events: list, today_only: bool = False) -> list:
     from datetime import datetime, timezone, timedelta
     result = []
@@ -497,9 +570,9 @@ def filter_events(events: list, today_only: bool = False) -> list:
 
     for e in events:
         impact = e.get("impact", "").lower()
-        if impact != "high":
+        if impact not in ("high", "medium"):
             continue
-        if e.get("country", "") not in TARGET_CURRENCIES:
+        if e.get("currency", "") not in TARGET_CURRENCIES:
             continue
         if today_only:
             date_raw = e.get("date", "")
@@ -511,92 +584,34 @@ def filter_events(events: list, today_only: bool = False) -> list:
             except Exception:
                 continue
         result.append(e)
-
-    result.sort(key=lambda e: CURRENCY_PRIORITY.get(e.get("country", ""), 99))
     return result
 
 
-def get_asset_impact(title: str, currency: str) -> str:
-    t = title.lower()
-    if any(k in t for k in ["cpi", "inflation", "pce"]):
-        return "🥇 طلا، 💵 دلار"
-    if any(k in t for k in ["non-farm", "nonfarm", "employment", "unemployment", "payroll", "jobless"]):
-        return "💵 دلار، 🥇 طلا"
-    if any(k in t for k in ["interest rate", "fomc", "rate statement", "rate decision", "fed"]):
-        return "💵 دلار، 🥇 طلا، ₿ بیت‌کوین"
-    if any(k in t for k in ["gdp"]):
-        return "💱 ارز ملی، 📈 بورس"
-    if any(k in t for k in ["retail sales"]):
-        return "💵 دلار، 📈 بورس"
-    if any(k in t for k in ["pmi", "manufacturing", "ism"]):
-        return "💱 ارز ملی، 📈 بورس"
-    if any(k in t for k in ["speech", "speaks", "testimony", "press conference"]):
-        return "💵 دلار، ₿ بیت‌کوین"
-    return "💱 ارز مربوطه و بازارهای هم‌سو"
-
-def get_data_explanation(title: str) -> str:
-    t = title.lower()
-    period = ""
-    if "m/m" in t:
-        period = " نسبت به ماه قبل"
-    elif "y/y" in t:
-        period = " نسبت به سال قبل"
-    elif "q/q" in t:
-        period = " نسبت به فصل قبل"
-
-    if "trimmed mean cpi" in t:
-        return f"نرخ تورم (نسخه‌ی هرس‌شده که نوسانات شدید رو کنار می‌گذاره){period}."
-    if any(k in t for k in ["cpi", "inflation", "pce"]):
-        base = "نرخ تورم سالانه" if "y/y" in t else "نرخ تورم ماهانه" if "m/m" in t else "نرخ تورم"
-        return f"{base}؛ میزان افزایش قیمت کالا و خدمات مصرفی{period}."
-    if "unemployment rate" in t:
-        return "درصد افراد بی‌کار از کل نیروی کار."
-    if any(k in t for k in ["non-farm", "nonfarm", "employment", "payroll", "jobless"]):
-        return "تعداد شغل‌های جدید ایجاد شده؛ نشون‌دهنده‌ی قدرت بازار کار."
-    if any(k in t for k in ["interest rate", "fomc", "rate statement", "rate decision", "fed"]):
-        return "نرخ بهره‌ای که بانک مرکزی تعیین می‌کنه؛ مهم‌ترین عامل تاثیرگذار روی ارزش پول."
-    if "gdp" in t:
-        return f"نرخ رشد اقتصادی{period}."
-    if "retail sales" in t:
-        return f"میزان خرید مصرف‌کننده‌ها{period}؛ نشونه‌ی قدرت اقتصادی مردمه."
-    if any(k in t for k in ["pmi", "manufacturing", "ism"]):
-        return "وضعیت بخش تولید و کارخانه‌ها؛ بالای ۵۰ یعنی رشد، زیر ۵۰ یعنی رکود."
-    if any(k in t for k in ["speech", "speaks", "testimony", "press conference"]):
-        return "صحبت‌های رسمی مقامات بانک مرکزی که می‌تونه روی انتظارات بازار اثر بگذاره."
-    return "یه شاخص اقتصادی که می‌تونه روی ارزش پول ملی و بازارها اثر بگذاره."
 def format_event(e: dict) -> str:
     from datetime import datetime, timezone, timedelta
-    currency = e.get("country", "")
+    currency = e.get("currency", "")
     currency_fa = CURRENCY_FA.get(currency, currency)
     title_en = e.get("title", "")
     forecast = e.get("forecast", "") or "—"
     previous = e.get("previous", "") or "—"
     impact = e.get("impact", "").lower()
     impact_icon = "🔴" if impact == "high" else "🟠"
-    actual = e.get("actual", "") or ""
 
     date_raw = e.get("date", "")
-    is_published = False
     try:
         dt_utc = datetime.fromisoformat(date_raw.replace("Z", "+00:00"))
         dt_tehran = dt_utc + timedelta(hours=3, minutes=30)
         time_str = dt_tehran.strftime("%H:%M")
         day_str = dt_tehran.strftime("%Y/%m/%d")
-        is_published = dt_utc <= datetime.now(timezone.utc)
     except Exception:
         time_str = "—"
         day_str = "—"
 
-    status_line = f"✅ منتشر شد: {actual}\n" if (is_published and actual) else ""
-
-    explanation = get_data_explanation(title_en)
     return (
         f"{impact_icon} {currency_fa}\n"
         f"📌 {title_en}\n"
         f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
-        f"{status_line}"
         f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
-        f"ℹ️ {explanation}\n"
     )
 
 
@@ -1050,16 +1065,9 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buf.seek(0)
     plt.close(fig)
 
-    asset_word = "طلا" if fund_type == "gold" else "نقره"
-    bubble_explainer = (
-        "💡 حباب یعنی چی؟\n"
-        f"وقتی قیمتی که یه صندوق {asset_word} توی بازار بورس معامله می‌شه، با ارزش واقعی {asset_word}ی که پشتشه یکی نباشه، "
-        "به این اختلاف «حباب» می‌گن. اگه حباب مثبت باشه یعنی صندوق گرون‌تر از ارزش واقعی داراییش معامله می‌شه؛ "
-        "اگه منفی باشه یعنی ارزون‌تر معامله می‌شه."
-    )
     await query.message.reply_photo(
         photo=buf,
-        caption=f"🫧 حباب صندوق‌های {label}\n\n{bubble_explainer}",
+        caption=f"🫧 حباب صندوق‌های {label}",
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -1161,6 +1169,8 @@ async def handle_non_photo_while_waiting_receipt(update: Update, context: Contex
         "یا از دکمه‌ی زیر برای رفتن به منوی اصلی استفاده کن 👇",
         reply_markup=keyboard,
     )
+
+
 async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
     """جاب دوره‌ای: یادآوری ۷ روز/۳ روز/روز آخر مونده به اتمام اشتراک،
     و حذف خودکار + پیشنهاد تمدید برای کسانی که اشتراکشان واقعاً تمام شده."""
@@ -1353,28 +1363,9 @@ async def vip_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def main():
-    persistence_path = "/data/bot_persistence.pickle" if os.path.isdir("/data") else "bot_persistence.pickle"
-    persistence = PicklePersistence(filepath=persistence_path)
-    app = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CallbackQueryHandler(show_analysis_menu, pattern="^analysis_menu$"),
-            CallbackQueryHandler(show_analysis, pattern="^(gold|dollar|bitcoin)$"),
-            CallbackQueryHandler(back_to_menu, pattern="^menu$"),
-            CallbackQueryHandler(gold_calc_start, pattern="^gold_calc$"),
-            CallbackQueryHandler(gold_live, pattern="^gold_live$"),
-            CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
-            CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"),
-            CallbackQueryHandler(calendar_today, pattern="^cal_today$"),
-            CallbackQueryHandler(calendar_week, pattern="^cal_week$"),
-            CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"),
-            CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"),
-            CallbackQueryHandler(vip_menu, pattern="^vip_menu$"),
-            CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
-        ],
-        persistent=True,
-        name="main_conversation",
+        entry_points=[CommandHandler("start", start)],
         states={
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_PHONE: [
@@ -1398,6 +1389,7 @@ def main():
                 CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"),
                 CallbackQueryHandler(vip_menu, pattern="^vip_menu$"),
                 CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
+                CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
             ],
             GOLD_CALC_OUNCE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_ounce),
@@ -1409,7 +1401,21 @@ def main():
         fallbacks=[CommandHandler("start", start)],
     )
     app.add_handler(conv)
-    
+    app.add_handler(CallbackQueryHandler(show_analysis_menu, pattern="^analysis_menu$"))
+    app.add_handler(CallbackQueryHandler(show_analysis, pattern="^(gold|dollar|bitcoin)$"))
+    app.add_handler(CallbackQueryHandler(back_to_menu, pattern="^menu$"))
+    app.add_handler(CallbackQueryHandler(check_membership_callback, pattern="^check_membership$"))
+    app.add_handler(CallbackQueryHandler(gold_calc_start, pattern="^gold_calc$"))
+    app.add_handler(CallbackQueryHandler(gold_live, pattern="^gold_live$"))
+    app.add_handler(CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"))
+    app.add_handler(CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"))
+    app.add_handler(CallbackQueryHandler(calendar_today, pattern="^cal_today$"))
+    app.add_handler(CallbackQueryHandler(calendar_week, pattern="^cal_week$"))
+    app.add_handler(CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"))
+    app.add_handler(CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"))
+    app.add_handler(CallbackQueryHandler(vip_menu, pattern="^vip_menu$"))
+    app.add_handler(CallbackQueryHandler(vip_pay, pattern="^vip_pay$"))
+    app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
     app.add_handler(CommandHandler("approve", approve_vip))

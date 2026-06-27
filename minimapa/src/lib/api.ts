@@ -149,12 +149,26 @@ export const api = {
     ),
 
   settings: () =>
-    request<{ vip_price_usdt: number; vip_days: number }>("/settings"),
+    request<{
+      vip_price_usdt: number;
+      vip_days: number;
+      referral_enabled: boolean;
+      referral_required_count: number;
+    }>("/settings"),
 
   saveSettings: (vipPriceUsdt: number, vipDays: number) =>
     request<{ ok: boolean }>("/settings", {
       method: "POST",
       body: JSON.stringify({ vip_price_usdt: vipPriceUsdt, vip_days: vipDays }),
+    }),
+
+  saveReferralSettings: (referralEnabled: boolean, requiredCount: number) =>
+    request<{ ok: boolean }>("/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        referral_enabled: referralEnabled,
+        referral_required_count: requiredCount,
+      }),
     }),
 };
 
