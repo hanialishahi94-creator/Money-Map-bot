@@ -990,9 +990,16 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buf.seek(0)
     plt.close(fig)
 
+    asset_word = "طلا" if fund_type == "gold" else "نقره"
+    bubble_explainer = (
+        "💡 حباب یعنی چی؟\n"
+        f"وقتی قیمتی که یه صندوق {asset_word} توی بازار بورس معامله می‌شه، با ارزش واقعی {asset_word}ی که پشتشه یکی نباشه، "
+        "به این اختلاف «حباب» می‌گن. اگه حباب مثبت باشه یعنی صندوق گرون‌تر از ارزش واقعی داراییش معامله می‌شه؛ "
+        "اگه منفی باشه یعنی ارزون‌تر معامله می‌شه."
+    )
     await query.message.reply_photo(
         photo=buf,
-        caption=f"🫧 حباب صندوق‌های {label}",
+        caption=f"🫧 حباب صندوق‌های {label}\n\n{bubble_explainer}",
         reply_markup=keyboard,
     )
     return MAIN_MENU
