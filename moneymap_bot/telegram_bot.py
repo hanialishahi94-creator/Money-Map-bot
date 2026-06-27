@@ -535,7 +535,36 @@ def get_asset_impact(title: str, currency: str) -> str:
         return "💵 دلار، ₿ بیت‌کوین"
     return "💱 ارز مربوطه و بازارهای هم‌سو"
 
+def get_data_explanation(title: str) -> str:
+    t = title.lower()
+    period = ""
+    if "m/m" in t:
+        period = " نسبت به ماه قبل"
+    elif "y/y" in t:
+        period = " نسبت به سال قبل"
+    elif "q/q" in t:
+        period = " نسبت به فصل قبل"
 
+    if "trimmed mean cpi" in t:
+        return f"نرخ تورم (نسخه‌ی هرس‌شده که نوسانات شدید رو کنار می‌گذاره){period}."
+    if any(k in t for k in ["cpi", "inflation", "pce"]):
+        base = "نرخ تورم سالانه" if "y/y" in t else "نرخ تورم ماهانه" if "m/m" in t else "نرخ تورم"
+        return f"{base}؛ میزان افزایش قیمت کالا و خدمات مصرفی{period}."
+    if "unemployment rate" in t:
+        return "درصد افراد بی‌کار از کل نیروی کار."
+    if any(k in t for k in ["non-farm", "nonfarm", "employment", "payroll", "jobless"]):
+        return "تعداد شغل‌های جدید ایجاد شده؛ نشون‌دهنده‌ی قدرت بازار کار."
+    if any(k in t for k in ["interest rate", "fomc", "rate statement", "rate decision", "fed"]):
+        return "نرخ بهره‌ای که بانک مرکزی تعیین می‌کنه؛ مهم‌ترین عامل تاثیرگذار روی ارزش پول."
+    if "gdp" in t:
+        return f"نرخ رشد اقتصادی{period}."
+    if "retail sales" in t:
+        return f"میزان خرید مصرف‌کننده‌ها{period}؛ نشونه‌ی قدرت اقتصادی مردمه."
+    if any(k in t for k in ["pmi", "manufacturing", "ism"]):
+        return "وضعیت بخش تولید و کارخانه‌ها؛ بالای ۵۰ یعنی رشد، زیر ۵۰ یعنی رکود."
+    if any(k in t for k in ["speech", "speaks", "testimony", "press conference"]):
+        return "صحبت‌های رسمی مقامات بانک مرکزی که می‌تونه روی انتظارات بازار اثر بگذاره."
+    return "یه شاخص اقتصادی که می‌تونه روی ارزش پول ملی و بازارها اثر بگذاره."
 def format_event(e: dict) -> str:
     from datetime import datetime, timezone, timedelta
     currency = e.get("country", "")
@@ -561,12 +590,14 @@ def format_event(e: dict) -> str:
 
     status_line = f"✅ منتشر شد: {actual}\n" if (is_published and actual) else ""
 
+    explanation = get_data_explanation(title_en)
     return (
         f"{impact_icon} {currency_fa}\n"
         f"📌 {title_en}\n"
         f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
         f"{status_line}"
         f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
+        f"ℹ️ {explanation}\n"
     )
 
 
