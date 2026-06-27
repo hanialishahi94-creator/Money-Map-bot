@@ -1,7 +1,7 @@
 import os
 import re
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes, PicklePersistence
 from telegram.error import TelegramError
 import logging
 import db
@@ -1264,9 +1264,13 @@ async def vip_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    persistence_path = "/data/bot_persistence.pickle" if os.path.isdir("/data") else "bot_persistence.pickle"
+    persistence = PicklePersistence(filepath=persistence_path)
+    app = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
+        persistent=True,
+        name="main_conversation",
         states={
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_PHONE: [
