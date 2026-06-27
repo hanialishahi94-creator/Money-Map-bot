@@ -1268,7 +1268,22 @@ def main():
     persistence = PicklePersistence(filepath=persistence_path)
     app = Application.builder().token(TELEGRAM_TOKEN).persistence(persistence).build()
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(show_analysis_menu, pattern="^analysis_menu$"),
+            CallbackQueryHandler(show_analysis, pattern="^(gold|dollar|bitcoin)$"),
+            CallbackQueryHandler(back_to_menu, pattern="^menu$"),
+            CallbackQueryHandler(gold_calc_start, pattern="^gold_calc$"),
+            CallbackQueryHandler(gold_live, pattern="^gold_live$"),
+            CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
+            CallbackQueryHandler(calendar_menu, pattern="^calendar_menu$"),
+            CallbackQueryHandler(calendar_today, pattern="^cal_today$"),
+            CallbackQueryHandler(calendar_week, pattern="^cal_week$"),
+            CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"),
+            CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"),
+            CallbackQueryHandler(vip_menu, pattern="^vip_menu$"),
+            CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
+        ],
         persistent=True,
         name="main_conversation",
         states={
