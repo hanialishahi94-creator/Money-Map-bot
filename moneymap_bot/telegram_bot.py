@@ -285,7 +285,7 @@ async def fetch_tgju_price(symbol: str) -> float | None:
     url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.json()
