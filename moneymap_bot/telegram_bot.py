@@ -282,19 +282,18 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== گرفتن قیمت لحظه‌ای از tgju =====
 async def fetch_tgju_price(symbol: str) -> float | None:
     import aiohttp
-    url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
+    import re
+    url = f"https://www.tgju.org/profile/{symbol}"
     try:
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15), headers=headers) as resp:
                 if resp.status != 200:
                     return None
-                data = await resp.json()
-                # مقدار قیمت در فیلد "p" یا "price" هست
-                rows = data.get("data", [])
-                if rows:
-                    raw = rows[0][3]  # ستون چهارم = قیمت بسته‌شدن (نزدیک‌ترین به قیمت واقعی)
-                    price = float(str(raw).replace(",", ""))
-                    return price
+                html = await resp.text()
+                match = re.search(r'data-col="info\.last_trade\.PDrCotVal">([\d,]+)', html)
+                if match:
+                    return float(match.group(1).replace(",", ""))
     except Exception as e:
         logger.error(f"خطا در دریافت قیمت {symbol}: {e}")
     return None
