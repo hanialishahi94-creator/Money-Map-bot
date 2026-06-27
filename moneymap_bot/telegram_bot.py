@@ -292,7 +292,7 @@ async def fetch_tgju_price(symbol: str) -> float | None:
                 # مقدار قیمت در فیلد "p" یا "price" هست
                 rows = data.get("data", [])
                 if rows:
-                    raw = rows[0][1]  # ستون دوم = قیمت فعلی
+                    raw = rows[0][3]  # ستون چهارم = قیمت بسته‌شدن (نزدیک‌ترین به قیمت واقعی)
                     price = float(str(raw).replace(",", ""))
                     return price
     except Exception as e:
