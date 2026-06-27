@@ -300,23 +300,38 @@ async def fetch_tgju_price(symbol: str) -> float | None:
     return None
 
 
+async def fetch_gold18_market_price() -> float | None:
+    """قیمت بازار واقعی هر گرم طلای ۱۸ عیار (برای محاسبه درصد حباب)"""
+    return await fetch_tgju_price("geram18")
+
+
 def calc_gold18(ounce_usd: float, dollar_toman: float) -> tuple[float, float]:
     gram_usd = (ounce_usd / 31.1035) * 0.75
     gram_toman = gram_usd * dollar_toman
     return gram_usd, gram_toman
 
 
-def gold_result_text(ounce_usd: float, dollar_toman: float, source: str) -> str:
+def gold_result_text(ounce_usd: float, dollar_toman: float, source: str, market_price: float | None = None) -> str:
     gram_usd, gram_toman = calc_gold18(ounce_usd, dollar_toman)
-    return (
+    text = (
         f"📊 ارزش واقعی طلای ۱۸ عیار {source}\n"
         f"{'─' * 32}\n"
         f"🔸 اونس جهانی: {ounce_usd:,.2f} دلار\n"
         f"🔸 نرخ دلار (بازار آزاد): {dollar_toman:,.0f} تومان\n"
         f"{'─' * 32}\n"
-        f"💰 ارزش هر گرم طلای ۱۸ عیار:\n"
+        f"💰 ارزش واقعی هر گرم طلای ۱۸ عیار:\n"
         f"   {gram_toman:,.0f} تومان"
     )
+    if market_price:
+        bubble_pct = (market_price - gram_toman) / gram_toman * 100
+        sign = "+" if bubble_pct >= 0 else ""
+        emoji = "🔴" if bubble_pct > 0 else ("🟢" if bubble_pct < 0 else "⚪")
+        text += (
+            f"\n{'─' * 32}\n"
+            f"🏷️ قیمت بازار طلا: {market_price:,.0f} تومان\n"
+            f"{emoji} حباب: {sign}{bubble_pct:.1f}٪"
+        )
+    return text
 
 
 # ===== ماشین حساب طلای ۱۸ عیار =====
@@ -351,6 +366,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
 
     dollar_toman = dollar / 10
+    market_price = await fetch_gold18_market_price()
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی مجدد", callback_data="gold_live")],
@@ -358,7 +374,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        gold_result_text(ounce, dollar_toman, "لحظه‌ای"),
+        gold_result_text(ounce, dollar_toman, "لحظه‌ای", market_price),
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -420,13 +436,14 @@ async def gold_calc_get_dollar(update: Update, context: ContextTypes.DEFAULT_TYP
         return GOLD_CALC_DOLLAR
 
     ounce_price = context.user_data["ounce_price"]
+    market_price = await fetch_gold18_market_price()
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 محاسبه مجدد", callback_data="gold_custom")],
         [InlineKeyboardButton("📡 مشاهده قیمت لحظه‌ای", callback_data="gold_live")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await update.message.reply_text(
-        gold_result_text(ounce_price, dollar_rate, "با مفروضات شما"),
+        gold_result_text(ounce_price, dollar_rate, "با مفروضات شما", market_price),
         reply_markup=keyboard,
     )
     return MAIN_MENU
