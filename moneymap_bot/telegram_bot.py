@@ -497,7 +497,7 @@ def filter_events(events: list, today_only: bool = False) -> list:
         impact = e.get("impact", "").lower()
         if impact not in ("high", "medium"):
             continue
-        if e.get("currency", "") not in TARGET_CURRENCIES:
+        if e.get("country", "") not in TARGET_CURRENCIES:
             continue
         if today_only:
             date_raw = e.get("date", "")
@@ -514,7 +514,7 @@ def filter_events(events: list, today_only: bool = False) -> list:
 
 def format_event(e: dict) -> str:
     from datetime import datetime, timezone, timedelta
-    currency = e.get("currency", "")
+    currency = e.get("country", "")
     currency_fa = CURRENCY_FA.get(currency, currency)
     title_en = e.get("title", "")
     forecast = e.get("forecast", "") or "—"
