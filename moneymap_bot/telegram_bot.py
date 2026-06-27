@@ -162,11 +162,11 @@ async def _process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, pho
     db.upsert_user(user_id, name, phone, username)
     logger.info(f"کاربر جدید: {name} - {phone}")
 
-    # اگه از طریق لینک رفرال وارد شده، معرفش رو ثبت کن و چک کن جایزه‌ای بهش تعلق می‌گیره یا نه
+    # اگه از طریق لینک رفرال وارد شده، فقط معرفش رو ثبت کن
+    # (جایزه و گزارش رفرال بعداً، فقط وقتی این کاربر واقعاً عضو کانال بشه، چک می‌شه)
     referrer_id = context.user_data.get("referrer_id")
     if referrer_id:
         db.set_referrer(user_id, referrer_id)
-        await _check_referral_reward(referrer_id, context)
 
     # ارسال اطلاعات به گروه ادمین
     try:
@@ -193,10 +193,31 @@ async def _process_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, pho
     return CHECK_MEMBERSHIP
 
 
+# ===== سیستم رفرال: گزارش خودکار به معرف به ازای هر عضویت موفق =====
+async def _notify_referrer_progress(referrer_id: int, context: ContextTypes.DEFAULT_TYPE):
+    """هر بار که یکی از دوستانِ معرفی‌شده‌ی این کاربر واقعاً عضو کانال شد،
+    یه گزارش پیشرفت خودکار براش می‌فرسته (حتی اگه هنوز به جایزه نهایی نرسیده باشه)."""
+    if not db.is_referral_enabled():
+        return
+    required = db.get_referral_required_count()
+    confirmed = db.get_confirmed_referral_count(referrer_id)
+    progress = confirmed % required if confirmed % required != 0 or confirmed == 0 else required
+    try:
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text=(
+                "🎉 خبر خوب! یکی از دوستایی که معرفی کردی عضو کانال شد.\n\n"
+                f"📊 پیشرفت فعلی تو: {progress}/{required} نفر"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"خطا در ارسال گزارش پیشرفت رفرال به {referrer_id}: {e}")
+
+
 # ===== سیستم رفرال: چک و اعطای جایزه عضویت رایگان =====
 async def _check_referral_reward(referrer_id: int, context: ContextTypes.DEFAULT_TYPE):
-    """بعد از ثبت‌نام موفق یه کاربر جدید (با شماره موبایل)، چک می‌کنه آیا معرفش
-    به تعداد لازم (مثلاً ۵ نفر) رسیده یا نه. اگه رسیده و کمپین رفرال فعال باشه،
+    """بعد از اینکه یه کاربر جدید واقعاً عضو کانال شد، چک می‌کنه آیا معرفش
+    به تعداد لازم (مثلاً ۸ نفر) رسیده یا نه. اگه رسیده و کمپین رفرال فعال باشه،
     عضویت VIP/کانال سیگنال رایگان براش فعال می‌کنه."""
     if not db.is_referral_enabled():
         return
@@ -263,6 +284,15 @@ async def check_membership_callback(update: Update, context: ContextTypes.DEFAUL
 
     if is_member:
         await query.message.reply_text("✅ عضویت تایید شد! خوش اومدی 🎉")
+
+        # اگه این اولین‌باره که عضویتش ثبت می‌شه و از طریق رفرال اومده، به معرفش گزارش بده و چک کن جایزه‌ای تعلق گرفته یا نه
+        newly_joined = db.mark_channel_joined(user_id)
+        if newly_joined:
+            referrer_id = db.get_referred_by(user_id)
+            if referrer_id:
+                await _notify_referrer_progress(referrer_id, context)
+                await _check_referral_reward(referrer_id, context)
+
         await show_main_menu(update, context)
         return MAIN_MENU
     else:
@@ -319,8 +349,10 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "👥 معرفی دوستان\n\n"
-        f"اگه {required} نفر رو با لینک زیر به بات معرفی کنی و اونا شماره موبایلشون رو ثبت کنن،\n"
+        f"اگه {required} نفر رو با لینک زیر به بات معرفی کنی و اونا واقعاً عضو کانال سیگنال بشن،\n"
         f"عضویت کانال سیگنال به‌صورت رایگان برات فعال می‌شه! 🎉\n\n"
+        "⚠️ توجه: صرفاً ثبت‌نام در بات کافی نیست؛ دوستت باید عضو کانال هم بشه.\n"
+        "هر بار که یکی از دوستات عضو کانال بشه، یه پیام گزارش پیشرفت برات می‌فرستیم.\n\n"
         f"🔗 لینک اختصاصی تو:\n{referral_link}\n\n"
         f"📊 پیشرفت فعلی: {progress}/{required} نفر\n"
         f"🎁 تعداد جوایزی که تا الان گرفتی: {rewards_given}"
@@ -1107,6 +1139,28 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard,
         )
         return MAIN_MENU
+
+    # کاربر هنوز VIP فعال نداره — دو راه پیش روشه: پرداخت یا دعوت دوستان
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 پرداخت هزینه اشتراک", callback_data="vip_pay_info")],
+        [InlineKeyboardButton("👥 دعوت دوستان (رایگان شو!)", callback_data="referral_menu")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    msg = (
+        "💎 اشتراک VIP سیگنال\n\n"
+        "برای دریافت عضویت کانال سیگنال یکی از دو راه زیر رو انتخاب کن:\n\n"
+        "💳 یا هزینه اشتراک رو پرداخت کن،\n"
+        "👥 یا با معرفی تعداد مشخصی از دوستات (که عضو کانال هم بشن)، عضویت رو رایگان دریافت کن!"
+    )
+    await query.message.reply_text(msg, reply_markup=keyboard)
+    return MAIN_MENU
+
+
+async def vip_pay_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش قیمت اشتراک و اطلاعات پرداخت (شماره کارت)."""
+    query = update.callback_query
+    await query.answer()
+
     vip_price_usdt = _vip_price_usdt()
     usdt_price = await fetch_usdt_price()
     if usdt_price:
@@ -1388,6 +1442,7 @@ def main():
                 CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"),
                 CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"),
                 CallbackQueryHandler(vip_menu, pattern="^vip_menu$"),
+                CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"),
                 CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
             ],
@@ -1414,6 +1469,7 @@ def main():
     app.add_handler(CallbackQueryHandler(bubble_menu, pattern="^bubble_menu$"))
     app.add_handler(CallbackQueryHandler(bubble_show, pattern="^bubble_(gold|silver)$"))
     app.add_handler(CallbackQueryHandler(vip_menu, pattern="^vip_menu$"))
+    app.add_handler(CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"))
     app.add_handler(CallbackQueryHandler(vip_pay, pattern="^vip_pay$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))

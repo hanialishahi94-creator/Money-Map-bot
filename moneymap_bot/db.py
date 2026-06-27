@@ -71,6 +71,15 @@ def init_db():
         for col in ("reminder_7", "reminder_3", "reminder_0"):
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE vip_members ADD COLUMN {col} INTEGER DEFAULT 0")
+
+        # migration: ستون‌های سیستم رفرال (معرفی دوستان) برای جدول users
+        existing_user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "referred_by" not in existing_user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
+        if "referral_rewards_given" not in existing_user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN referral_rewards_given INTEGER DEFAULT 0")
+        if "joined_channel" not in existing_user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN joined_channel INTEGER DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS analyses (
@@ -151,6 +160,84 @@ def find_user_by_phone(phone: str):
             (cleaned, cleaned.replace("+98", "0"), "+98" + cleaned.lstrip("0")),
         ).fetchone()
         return dict(row) if row else None
+
+
+# ---------- سیستم رفرال (معرفی دوستان) ----------
+
+def set_referrer(user_id: int, referrer_id: int):
+    """فقط وقتی کاربر برای اولین‌بار از طریق لینک رفرال وارد شده ثبت می‌شه.
+    اگه قبلاً referred_by داشته باشه (یا خودش معرف خودش باشه) تغییری نمی‌کنه."""
+    if not referrer_id or referrer_id == user_id:
+        return
+    with get_conn() as conn:
+        row = conn.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if row is None or row["referred_by"] is not None:
+            return
+        conn.execute("UPDATE users SET referred_by = ? WHERE user_id = ?", (referrer_id, user_id))
+
+
+def get_referred_by(user_id: int):
+    with get_conn() as conn:
+        row = conn.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        return row["referred_by"] if row else None
+
+
+def get_confirmed_referral_count(referrer_id: int):
+    """تعداد افرادی که این کاربر معرفی کرده و واقعاً عضو کانال شدن (رفرال موفق)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM users WHERE referred_by = ? AND joined_channel = 1",
+            (referrer_id,),
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+
+def mark_channel_joined(user_id: int) -> bool:
+    """وقتی کاربر عضویتش در کانال تایید می‌شه این رو صدا می‌زنیم.
+    اگه این اولین‌باری باشه که عضویتش ثبت می‌شه، True برمی‌گردونه (تا فقط یک‌بار جایزه/گزارش رفرال محاسبه شه)،
+    وگرنه (قبلاً ثبت شده بود) False برمی‌گردونه."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT joined_channel FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        already = bool(row and row["joined_channel"])
+        conn.execute(
+            "UPDATE users SET joined_channel = 1 WHERE user_id = ?", (user_id,)
+        )
+        return not already
+
+
+def get_referral_rewards_given(referrer_id: int):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT referral_rewards_given FROM users WHERE user_id = ?", (referrer_id,)
+        ).fetchone()
+        return row["referral_rewards_given"] if row and row["referral_rewards_given"] is not None else 0
+
+
+def increment_referral_rewards_given(referrer_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET referral_rewards_given = COALESCE(referral_rewards_given, 0) + 1 WHERE user_id = ?",
+            (referrer_id,),
+        )
+
+
+def is_referral_enabled():
+    val = get_setting("referral_enabled", "0")
+    return str(val) == "1"
+
+
+def set_referral_enabled(enabled: bool):
+    set_setting("referral_enabled", "1" if enabled else "0")
+
+
+def get_referral_required_count(default: int = 8):
+    val = get_setting("referral_required_count")
+    try:
+        return int(float(val)) if val is not None else default
+    except (TypeError, ValueError):
+        return default
 
 
 def get_users_signup_counts(days: int = 7):

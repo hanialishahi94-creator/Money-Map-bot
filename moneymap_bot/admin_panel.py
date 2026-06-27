@@ -49,7 +49,7 @@ UPLOADS_DIR = os.path.join(BASE_DIR, "static", "uploads", "analysis")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # پوشه‌ی خروجی build شده‌ی React (بعد از npm run build داخل پوشه minimapa)
-FRONTEND_DIST = os.path.normpath(os.path.join(BASE_DIR, "dist"))
+FRONTEND_DIST = os.path.normpath(os.path.join(BASE_DIR, "..", "minimapa", "dist"))
 
 
 # ===================================================================
@@ -146,8 +146,6 @@ def api_activate_vip_for_user(user_id):
     data = request.get_json(silent=True) or {}
     days = int(data.get("days") or db.get_vip_days())
     new_expire = db.add_vip_days(user_id, days)
-    expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d") if new_expire else ""
-    _telegram_send_message(user_id, f"🎉 اشتراک VIP شما فعال/تمدید شد!\n📅 تاریخ انقضای جدید: {expire_str}")
     return jsonify({"ok": True, "expire_at": new_expire})
 
 
@@ -155,7 +153,6 @@ def api_activate_vip_for_user(user_id):
 @login_required
 def api_remove_vip_for_user(user_id):
     db.remove_vip(user_id)
-    _telegram_send_message(user_id, "⚠️ اشتراک VIP شما توسط مدیر حذف شد.")
     return jsonify({"ok": True})
 
 
@@ -206,8 +203,6 @@ def api_vip_quick_activate():
     if not user:
         return jsonify({"ok": False, "error": "کاربری با این شماره در دیتابیس پیدا نشد (باید قبلاً با بات /start زده باشد)."}), 404
     new_expire = db.add_vip_days(user["user_id"], days)
-    expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d") if new_expire else ""
-    _telegram_send_message(user["user_id"], f"🎉 اشتراک VIP شما فعال/تمدید شد!\n📅 تاریخ انقضای جدید: {expire_str}")
     return jsonify({"ok": True, "user_id": user["user_id"], "expire_at": new_expire})
 
 
@@ -217,8 +212,6 @@ def api_vip_extend(user_id):
     data = request.get_json(silent=True) or {}
     days = int(data.get("days") or db.get_vip_days())
     new_expire = db.add_vip_days(user_id, days)
-    expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d") if new_expire else ""
-    _telegram_send_message(user_id, f"🎉 اشتراک VIP شما فعال/تمدید شد!\n📅 تاریخ انقضای جدید: {expire_str}")
     return jsonify({"ok": True, "expire_at": new_expire})
 
 
@@ -226,7 +219,6 @@ def api_vip_extend(user_id):
 @login_required
 def api_vip_remove(user_id):
     db.remove_vip(user_id)
-    _telegram_send_message(user_id, "⚠️ اشتراک VIP شما توسط مدیر حذف شد.")
     return jsonify({"ok": True})
 
 
@@ -324,6 +316,8 @@ def api_settings_get():
     return jsonify({
         "vip_price_usdt": db.get_vip_price_usdt(),
         "vip_days": db.get_vip_days(),
+        "referral_enabled": db.is_referral_enabled(),
+        "referral_required_count": db.get_referral_required_count(),
     })
 
 
@@ -335,6 +329,10 @@ def api_settings_post():
         db.set_setting("vip_price_usdt", float(data["vip_price_usdt"]))
     if "vip_days" in data:
         db.set_setting("vip_days", int(data["vip_days"]))
+    if "referral_enabled" in data:
+        db.set_referral_enabled(bool(data["referral_enabled"]))
+    if "referral_required_count" in data:
+        db.set_setting("referral_required_count", int(data["referral_required_count"]))
     return jsonify({"ok": True})
 
 
