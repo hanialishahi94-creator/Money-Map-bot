@@ -374,6 +374,23 @@ def api_broadcast():
 
 
 # ===================================================================
+# ارسال پیام مستقیم به یک کاربر خاص — از طریق Telegram Bot API
+# ===================================================================
+
+@app.route("/api/users/<int:user_id>/send-message", methods=["POST"])
+@login_required
+def api_send_message_to_user(user_id):
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "متن پیام خالی است."}), 400
+    ok = _telegram_send_message(user_id, text)
+    if not ok:
+        return jsonify({"ok": False, "error": "ارسال پیام ناموفق بود (شاید کاربر بات را بلاک کرده باشد)."}), 400
+    return jsonify({"ok": True})
+
+
+# ===================================================================
 # تنظیمات (قیمت و مدت اشتراک VIP)
 # ===================================================================
 
