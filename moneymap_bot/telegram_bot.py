@@ -1194,20 +1194,28 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== بخش VIP =====
 
 async def fetch_usdt_price() -> float | None:
-    """دریافت قیمت لحظه‌ای تتر (تومان) از صف خرید/فروش نوبیتکس"""
+    """دریافت قیمت لحظه‌ای تتر (تومان) — اول از تی‌جی‌جی‌یو (نماد تتر)، اگه نشد از API عمومی والکس"""
+    price_rial = await fetch_tgju_price("crypto-tether-irr")
+    if price_rial:
+        return price_rial / 10  # تبدیل ریال به تومان
+
     import aiohttp
-    url = "https://api.nobitex.ir/v2/orderbook/USDTIRT"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                last_price_rial = data.get("lastTradePrice")
-                if last_price_rial:
-                    return float(last_price_rial) / 10  # تبدیل ریال به تومان
+            async with session.get(
+                "https://api.wallex.ir/v1/markets",
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    symbols = data.get("result", {}).get("symbols", {})
+                    usdt = symbols.get("USDTTMN")
+                    if usdt:
+                        last_price = usdt.get("stats", {}).get("lastPrice")
+                        if last_price:
+                            return float(last_price)
     except Exception as e:
-        logger.error(f"خطا در دریافت قیمت لحظه‌ای تتر: {e}")
+        logger.error(f"خطا در دریافت قیمت لحظه‌ای تتر از والکس: {e}")
     return None
 
 
