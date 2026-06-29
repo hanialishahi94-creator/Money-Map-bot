@@ -37,6 +37,8 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "09124900216")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Saba09124900216")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+VIP_CHANNEL_ID = int(os.getenv("VIP_CHANNEL_ID", "-1003794396104"))
+VIP_CHANNEL_LINK = os.getenv("VIP_CHANNEL_LINK", "https://t.me/+6zpQXNwZD41mYWZk")
 
 ASSET_LABELS = {
     "gold": "🥇 طلا",
@@ -150,9 +152,12 @@ def api_activate_vip_for_user(user_id):
     new_expire = db.add_vip_days(user_id, days)
     if data.get("notify"):
         expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d %H:%M")
+        link = _telegram_create_vip_invite_link(user_id)
         _telegram_send_message(
             user_id,
-            f"🎉 اشتراک VIP سیگنال برای شما فعال/تمدید شد!\nتاریخ انقضا: {expire_str}",
+            f"🎉 اشتراک VIP سیگنال برای شما فعال/تمدید شد!\n\n"
+            f"🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n"
+            f"تاریخ انقضا: {expire_str}",
         )
     return jsonify({"ok": True, "expire_at": new_expire})
 
@@ -219,9 +224,12 @@ def api_vip_quick_activate():
     new_expire = db.add_vip_days(user["user_id"], days)
     if data.get("notify"):
         expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d %H:%M")
+        link = _telegram_create_vip_invite_link(user["user_id"])
         _telegram_send_message(
             user["user_id"],
-            f"🎉 اشتراک VIP سیگنال برای شما فعال/تمدید شد!\nتاریخ انقضا: {expire_str}",
+            f"🎉 اشتراک VIP سیگنال برای شما فعال/تمدید شد!\n\n"
+            f"🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n"
+            f"تاریخ انقضا: {expire_str}",
         )
     return jsonify({"ok": True, "user_id": user["user_id"], "expire_at": new_expire})
 
@@ -234,9 +242,12 @@ def api_vip_extend(user_id):
     new_expire = db.add_vip_days(user_id, days)
     if data.get("notify"):
         expire_str = datetime.datetime.fromtimestamp(new_expire).strftime("%Y/%m/%d %H:%M")
+        link = _telegram_create_vip_invite_link(user_id)
         _telegram_send_message(
             user_id,
-            f"🎉 اشتراک VIP سیگنال شما تمدید شد!\nتاریخ انقضای جدید: {expire_str}",
+            f"🎉 اشتراک VIP سیگنال شما تمدید شد!\n\n"
+            f"🔗 لینک ورود به کانال (یکبار مصرف):\n{link}\n\n"
+            f"تاریخ انقضای جدید: {expire_str}",
         )
     return jsonify({"ok": True, "expire_at": new_expire})
 
@@ -307,6 +318,30 @@ def _telegram_send_message(chat_id: int, text: str) -> bool:
             return bool(body.get("ok"))
     except Exception:
         return False
+
+
+def _telegram_create_vip_invite_link(user_id: int) -> str:
+    """ساخت یک لینک یک‌بارمصرف برای ورود کاربر به کانال VIP، برای استفاده در فعال‌سازی/تمدید از پنل ادمین.
+    اگه ساخت لینک به هر دلیلی شکست بخوره، لینک ثابت (که یک‌بارمصرف نیست) به‌عنوان جایگزین برگردونده می‌شه."""
+    if not BOT_TOKEN:
+        return VIP_CHANNEL_LINK
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/createChatInviteLink"
+    payload = json.dumps({
+        "chat_id": VIP_CHANNEL_ID,
+        "member_limit": 1,
+        "name": f"VIP-{user_id}",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("ok"):
+                return body["result"]["invite_link"]
+    except Exception:
+        pass
+    return VIP_CHANNEL_LINK
 
 
 @app.route("/api/broadcast", methods=["POST"])
