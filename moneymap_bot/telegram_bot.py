@@ -1194,10 +1194,20 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== بخش VIP =====
 
 async def fetch_usdt_price() -> float | None:
-    """دریافت قیمت تتر = قیمت دلار آزاد از tgju (ریال → تومان)"""
-    price_rial = await fetch_tgju_price("price_dollar_rl")
-    if price_rial:
-        return price_rial / 10  # تبدیل ریال به تومان
+    """دریافت قیمت لحظه‌ای تتر (تومان) از صف خرید/فروش نوبیتکس"""
+    import aiohttp
+    url = "https://api.nobitex.ir/v2/orderbook/USDTIRT"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                last_price_rial = data.get("lastTradePrice")
+                if last_price_rial:
+                    return float(last_price_rial) / 10  # تبدیل ریال به تومان
+    except Exception as e:
+        logger.error(f"خطا در دریافت قیمت لحظه‌ای تتر: {e}")
     return None
 
 
