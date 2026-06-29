@@ -9,6 +9,7 @@ import db
 # ===== تنظیمات =====
 TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")  # توکن ربات از متغیر محیطی (Railway -> Variables -> BOT_TOKEN)
 ADMIN_GROUP_ID = -1004358699434  # آیدی گروه ادمین
+SUPPORT_GROUP_ID = -1004347648811  # آیدی گروه پشتیبانی
 CHANNEL_USERNAME = "@Money_Mapp"  # یوزرنیم کانال (ربات باید توش ادمین باشه)
 
 # ===== تنظیمات VIP =====
@@ -310,6 +311,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
+        [InlineKeyboardButton("📞 پشتیبانی", callback_data="support_menu")],
     ])
     user_id = update.effective_user.id
     user_row = db.get_user(user_id)
@@ -401,6 +403,21 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await show_main_menu(update, context)
+    return MAIN_MENU
+
+
+async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """شروع گفتگوی پشتیبانی - از کاربر می‌خواد پیامش رو بنویسه"""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["waiting_support_message"] = True
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(
+        "📞 پشتیبانی\n\nپیامت رو بنویس و بفرست، در اولین فرصت بهت جواب می‌دیم.",
+        reply_markup=keyboard,
+    )
     return MAIN_MENU
 
 
@@ -1325,6 +1342,29 @@ async def handle_non_photo_while_waiting_receipt(update: Update, context: Contex
     ۲) هیچ هندلر دیگری این پیام را نگرفته (مثلاً به‌خاطر گم‌شدن وضعیت گفتگو بعد از ریستارت سرور،
        یا پیام کاملاً نامربوط) — به‌جای سکوت کامل، باید راهنمایی شود.
     """
+    if context.user_data.get("waiting_support_message"):
+        context.user_data["waiting_support_message"] = False
+        user_id = update.effective_user.id
+        user = update.effective_user
+        user_row = db.get_user(user_id)
+        name = user_row.get("name", user.full_name or "نامشخص") if user_row else (user.full_name or "نامشخص")
+        phone = user_row.get("phone", "—") if user_row else "—"
+        username = user.username or "ندارد"
+        sent = await context.bot.send_message(
+            chat_id=SUPPORT_GROUP_ID,
+            text=(
+                "📞 پیام پشتیبانی جدید\n\n"
+                f"👤 اسم: {name}\n"
+                f"📱 شماره: {phone}\n"
+                f"🔗 یوزرنیم: @{username}\n"
+                f"🆔 آیدی: {user_id}\n\n"
+                f"✉️ پیام:\n{update.message.text}"
+            ),
+        )
+        context.bot_data.setdefault("support_map", {})[sent.message_id] = user_id
+        await update.message.reply_text("✅ پیامت برای پشتیبانی ارسال شد. به‌زودی جواب می‌گیری.")
+        return
+
     if context.user_data.get("waiting_vip_receipt"):
         await update.message.reply_text(
             "📸 لطفاً رسید پرداخت را فقط به صورت «عکس» ارسال کن (نه فایل و نه متن)."
@@ -1340,6 +1380,25 @@ async def handle_non_photo_while_waiting_receipt(update: Update, context: Contex
         "یا از دکمه‌ی زیر برای رفتن به منوی اصلی استفاده کن 👇",
         reply_markup=keyboard,
     )
+
+
+async def support_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """وقتی ادمین توی گروه پشتیبانی روی پیام یه کاربر Reply می‌زنه، جوابش برای همون کاربر ارسال می‌شه"""
+    msg = update.message
+    if not msg or not msg.reply_to_message or not msg.text:
+        return
+    support_map = context.bot_data.get("support_map", {})
+    target_user_id = support_map.get(msg.reply_to_message.message_id)
+    if not target_user_id:
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=target_user_id,
+            text=f"📞 پاسخ پشتیبانی:\n{msg.text}",
+        )
+        await msg.reply_text("✅ ارسال شد.")
+    except Exception as e:
+        await msg.reply_text(f"⚠️ خطا در ارسال پاسخ: {e}")
 
 
 async def check_vip_expirations(context: ContextTypes.DEFAULT_TYPE):
@@ -1582,6 +1641,7 @@ def main():
                 CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"),
                 CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
+                CallbackQueryHandler(support_menu, pattern="^support_menu$"),
             ],
             GOLD_CALC_OUNCE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_ounce),
@@ -1609,6 +1669,8 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"))
     app.add_handler(CallbackQueryHandler(vip_pay, pattern="^vip_pay$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
+    app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
+    app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY & filters.TEXT, support_group_reply))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
     app.add_handler(CommandHandler("whereami", whereami_command))
