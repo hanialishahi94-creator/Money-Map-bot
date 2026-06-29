@@ -1033,6 +1033,9 @@ def _reshape_persian(text: str) -> str:
         return text
 
 
+_LAST_GOOD_BUBBLE = {}
+
+
 async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import matplotlib
     matplotlib.use("Agg")
@@ -1081,6 +1084,23 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not names:
         await query.message.reply_text("⚠️ داده‌های عددی قابل نمایش نبودند.", reply_markup=keyboard)
         return MAIN_MENU
+
+    stale_note = ""
+    is_all_zero = all(v == 0 for v in values)
+    if is_all_zero and fund_type in _LAST_GOOD_BUBBLE:
+        cached = _LAST_GOOD_BUBBLE[fund_type]
+        names, values = cached["names"], cached["values"]
+        stale_note = f"\n\n⏳ بازار بسته است؛ آخرین قیمت‌های معتبر (ساعت {cached['time_str']}) نمایش داده شده."
+    elif not is_all_zero:
+        from datetime import datetime, timezone, timedelta
+        now_tehran = datetime.now(timezone.utc) + timedelta(hours=3, minutes=30)
+        _LAST_GOOD_BUBBLE[fund_type] = {
+            "names": list(names),
+            "values": list(values),
+            "time_str": now_tehran.strftime("%H:%M"),
+        }
+    elif is_all_zero:
+        stale_note = "\n\n⏳ بازار بسته است."
 
     # مرتب نزولی
     paired = sorted(zip(values, names), reverse=True)
@@ -1166,7 +1186,7 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await query.message.reply_photo(
         photo=buf,
-        caption=f"🫧 حباب صندوق‌های {label}\n\n{bubble_explainer}",
+        caption=f"🫧 حباب صندوق‌های {label}\n\n{bubble_explainer}{stale_note}",
         reply_markup=keyboard,
     )
     return MAIN_MENU
