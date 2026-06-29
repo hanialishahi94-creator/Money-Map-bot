@@ -152,6 +152,12 @@ export const api = {
       { method: "POST", body: JSON.stringify({ target, text }) }
     ),
 
+  sendMessageToUser: (userId: number, text: string) =>
+    request<{ ok: boolean; error?: string }>(
+      `/users/${userId}/send-message`,
+      { method: "POST", body: JSON.stringify({ text }) }
+    ),
+
   settings: () =>
     request<{
       vip_price_usdt: number;

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Search, Trash2, Gem, Loader2, Bell, BellOff } from "lucide-react";
+import { Search, Trash2, Gem, Loader2, Bell, BellOff, MessageSquare, Send, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,10 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [notify, setNotify] = useState<Record<number, boolean>>({});
+  const [messagingId, setMessagingId] = useState<number | null>(null);
+  const [messageText, setMessageText] = useState("");
+  const [sendingMsg, setSendingMsg] = useState(false);
+  const [msgFeedback, setMsgFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -67,6 +71,35 @@ export default function UsersPage() {
       await load();
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function openMessageBox(userId: number) {
+    if (messagingId === userId) {
+      setMessagingId(null);
+      return;
+    }
+    setMessagingId(userId);
+    setMessageText("");
+    setMsgFeedback(null);
+  }
+
+  async function handleSendMessage(userId: number) {
+    if (!messageText.trim()) return;
+    setSendingMsg(true);
+    setMsgFeedback(null);
+    try {
+      const res = await api.sendMessageToUser(userId, messageText.trim());
+      if (res.ok) {
+        setMsgFeedback({ type: "ok", text: "پیام با موفقیت ارسال شد." });
+        setMessageText("");
+      } else {
+        setMsgFeedback({ type: "error", text: res.error || "ارسال پیام ناموفق بود." });
+      }
+    } catch (e: any) {
+      setMsgFeedback({ type: "error", text: e?.message || "ارسال پیام ناموفق بود." });
+    } finally {
+      setSendingMsg(false);
     }
   }
 
@@ -134,8 +167,8 @@ export default function UsersPage() {
             </thead>
             <tbody>
               {rows.map((u, i) => (
+                <Fragment key={u.user_id}>
                 <motion.tr
-                  key={u.user_id}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.04 }}
@@ -160,6 +193,9 @@ export default function UsersPage() {
                             {busyId === u.user_id ? <Loader2 size={13} className="animate-spin" /> : <Gem size={13} />} فعال‌سازی
                           </Button>
                         )}
+                        <Button size="sm" variant="outline" disabled={busyId === u.user_id} onClick={() => openMessageBox(u.user_id)}>
+                          <MessageSquare size={13} /> پیام
+                        </Button>
                         <Button size="sm" variant="outline" disabled={busyId === u.user_id} onClick={() => handleDelete(u.user_id)}>
                           <Trash2 size={13} />
                         </Button>
@@ -176,6 +212,43 @@ export default function UsersPage() {
                     </div>
                   </td>
                 </motion.tr>
+                {messagingId === u.user_id && (
+                  <tr className="bg-gold/[0.04]">
+                    <td colSpan={6} className="py-4 px-2">
+                      <div className="flex flex-col gap-3">
+                        <div className="text-xs text-muted">
+                          ارسال پیام مستقیم به <span className="text-gold-light font-bold">{u.name || u.user_id}</span> از طریق بات
+                        </div>
+                        <div className="flex flex-wrap items-start gap-2">
+                          <textarea
+                            value={messageText}
+                            onChange={(e) => setMessageText(e.target.value)}
+                            placeholder="متن پیام را بنویس..."
+                            className="flex-1 min-w-[220px] min-h-[70px] rounded-xl bg-white/[0.03] border border-white/10 p-3 text-sm text-text outline-none focus:border-gold/40"
+                          />
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              size="sm"
+                              disabled={sendingMsg || !messageText.trim()}
+                              onClick={() => handleSendMessage(u.user_id)}
+                            >
+                              {sendingMsg ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} ارسال
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setMessagingId(null)}>
+                              <X size={13} /> بستن
+                            </Button>
+                          </div>
+                        </div>
+                        {msgFeedback && (
+                          <div className={`text-xs font-bold ${msgFeedback.type === "ok" ? "text-green" : "text-red"}`}>
+                            {msgFeedback.text}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
               {!loading && rows.length === 0 && (
                 <tr>
