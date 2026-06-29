@@ -1486,9 +1486,13 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     """تأیید VIP با دکمه inline در گروه ادمین"""
     import time
     query = update.callback_query
-    await query.answer()
     if update.effective_chat.id != ADMIN_GROUP_ID:
+        await query.answer()
         return
+    if query.message.caption and ("✅ تأیید شد" in query.message.caption or "❌ رد شد" in query.message.caption):
+        await query.answer("این رسید قبلاً پردازش شده — برای جلوگیری از ساخت لینک تکراری، دوباره پردازش نمی‌شود.", show_alert=True)
+        return
+    await query.answer()
     target_id = int(query.data.split("_")[2])
     new_expire = db.add_vip_days(target_id, _vip_days())
     try:
@@ -1509,17 +1513,25 @@ async def vip_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await query.edit_message_caption(
             caption=query.message.caption + "\n\n✅ تأیید شد — لینک ارسال گردید.",
+            reply_markup=None,
         )
     except Exception as e:
-        await query.edit_message_caption(caption=query.message.caption + f"\n\n⚠️ خطا: {e}")
+        await query.edit_message_caption(
+            caption=query.message.caption + f"\n\n⚠️ خطا: {e}",
+            reply_markup=None,
+        )
 
 
 async def vip_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """رد VIP با دکمه inline در گروه ادمین"""
     query = update.callback_query
-    await query.answer()
     if update.effective_chat.id != ADMIN_GROUP_ID:
+        await query.answer()
         return
+    if query.message.caption and ("✅ تأیید شد" in query.message.caption or "❌ رد شد" in query.message.caption):
+        await query.answer("این رسید قبلاً پردازش شده.", show_alert=True)
+        return
+    await query.answer()
     target_id = int(query.data.split("_")[2])
     try:
         await context.bot.send_message(
@@ -1528,9 +1540,13 @@ async def vip_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await query.edit_message_caption(
             caption=query.message.caption + "\n\n❌ رد شد.",
+            reply_markup=None,
         )
     except Exception as e:
-        await query.edit_message_caption(caption=query.message.caption + f"\n\n⚠️ خطا: {e}")
+        await query.edit_message_caption(
+            caption=query.message.caption + f"\n\n⚠️ خطا: {e}",
+            reply_markup=None,
+        )
 
 
 def main():
