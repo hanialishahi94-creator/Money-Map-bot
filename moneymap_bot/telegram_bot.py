@@ -1549,6 +1549,10 @@ async def vip_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 
+async def whereami_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"🆔 آیدی همین چت/گروه: {update.effective_chat.id}")
+
+
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
@@ -1607,6 +1611,7 @@ def main():
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
+    app.add_handler(CommandHandler("whereami", whereami_command))
     app.add_handler(CommandHandler("approve", approve_vip))
     app.add_handler(CommandHandler("reject", reject_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_vip))
