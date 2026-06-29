@@ -590,6 +590,9 @@ async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
         return None
 
 
+CURRENCY_PRIORITY = {c: i for i, c in enumerate(CURRENCY_FA.keys())}
+
+
 def filter_events(events: list, today_only: bool = False) -> list:
     from datetime import datetime, timezone, timedelta
     result = []
@@ -598,9 +601,9 @@ def filter_events(events: list, today_only: bool = False) -> list:
 
     for e in events:
         impact = e.get("impact", "").lower()
-        if impact not in ("high", "medium"):
+        if impact != "high":
             continue
-        if e.get("currency", "") not in TARGET_CURRENCIES:
+        if e.get("country", "") not in TARGET_CURRENCIES:
             continue
         if today_only:
             date_raw = e.get("date", "")
@@ -612,34 +615,95 @@ def filter_events(events: list, today_only: bool = False) -> list:
             except Exception:
                 continue
         result.append(e)
+
+    result.sort(key=lambda e: CURRENCY_PRIORITY.get(e.get("country", ""), 99))
     return result
+
+
+def get_asset_impact(title: str, currency: str) -> str:
+    t = title.lower()
+    if any(k in t for k in ["cpi", "inflation", "pce"]):
+        return "🥇 طلا، 💵 دلار"
+    if any(k in t for k in ["non-farm", "nonfarm", "employment", "unemployment", "payroll", "jobless"]):
+        return "💵 دلار، 🥇 طلا"
+    if any(k in t for k in ["interest rate", "fomc", "rate statement", "rate decision", "fed"]):
+        return "💵 دلار، 🥇 طلا، ₿ بیت‌کوین"
+    if any(k in t for k in ["gdp"]):
+        return "💱 ارز ملی، 📈 بورس"
+    if any(k in t for k in ["retail sales"]):
+        return "💵 دلار، 📈 بورس"
+    if any(k in t for k in ["pmi", "manufacturing", "ism"]):
+        return "💱 ارز ملی، 📈 بورس"
+    if any(k in t for k in ["speech", "speaks", "testimony", "press conference"]):
+        return "💵 دلار، ₿ بیت‌کوین"
+    return "💱 ارز مربوطه و بازارهای هم‌سو"
+
+
+def get_data_explanation(title: str) -> str:
+    t = title.lower()
+    period = ""
+    if "m/m" in t:
+        period = " نسبت به ماه قبل"
+    elif "y/y" in t:
+        period = " نسبت به سال قبل"
+    elif "q/q" in t:
+        period = " نسبت به فصل قبل"
+
+    if "trimmed mean cpi" in t:
+        return f"نرخ تورم (نسخه‌ی هرس‌شده که نوسانات شدید رو کنار می‌گذاره){period}."
+    if any(k in t for k in ["cpi", "inflation", "pce"]):
+        base = "نرخ تورم سالانه" if "y/y" in t else "نرخ تورم ماهانه" if "m/m" in t else "نرخ تورم"
+        return f"{base}؛ میزان افزایش قیمت کالا و خدمات مصرفی{period}."
+    if "unemployment rate" in t:
+        return "درصد افراد بی‌کار از کل نیروی کار."
+    if any(k in t for k in ["non-farm", "nonfarm", "employment", "payroll", "jobless"]):
+        return "تعداد شغل‌های جدید ایجاد شده؛ نشون‌دهنده‌ی قدرت بازار کار."
+    if any(k in t for k in ["interest rate", "fomc", "rate statement", "rate decision", "fed"]):
+        return "نرخ بهره‌ای که بانک مرکزی تعیین می‌کنه؛ مهم‌ترین عامل تاثیرگذار روی ارزش پول."
+    if "gdp" in t:
+        return f"نرخ رشد اقتصادی{period}."
+    if "retail sales" in t:
+        return f"میزان خرید مصرف‌کننده‌ها{period}؛ نشونه‌ی قدرت اقتصادی مردمه."
+    if any(k in t for k in ["pmi", "manufacturing", "ism"]):
+        return "وضعیت بخش تولید و کارخانه‌ها؛ بالای ۵۰ یعنی رشد، زیر ۵۰ یعنی رکود."
+    if any(k in t for k in ["speech", "speaks", "testimony", "press conference"]):
+        return "صحبت‌های رسمی مقامات بانک مرکزی که می‌تونه روی انتظارات بازار اثر بگذاره."
+    return "یه شاخص اقتصادی که می‌تونه روی ارزش پول ملی و بازارها اثر بگذاره."
 
 
 def format_event(e: dict) -> str:
     from datetime import datetime, timezone, timedelta
-    currency = e.get("currency", "")
+    currency = e.get("country", "")
     currency_fa = CURRENCY_FA.get(currency, currency)
     title_en = e.get("title", "")
     forecast = e.get("forecast", "") or "—"
     previous = e.get("previous", "") or "—"
     impact = e.get("impact", "").lower()
     impact_icon = "🔴" if impact == "high" else "🟠"
+    actual = e.get("actual", "") or ""
 
     date_raw = e.get("date", "")
+    is_published = False
     try:
         dt_utc = datetime.fromisoformat(date_raw.replace("Z", "+00:00"))
         dt_tehran = dt_utc + timedelta(hours=3, minutes=30)
         time_str = dt_tehran.strftime("%H:%M")
         day_str = dt_tehran.strftime("%Y/%m/%d")
+        is_published = dt_utc <= datetime.now(timezone.utc)
     except Exception:
         time_str = "—"
         day_str = "—"
 
+    status_line = f"✅ منتشر شد: {actual}\n" if (is_published and actual) else ""
+
+    explanation = get_data_explanation(title_en)
     return (
         f"{impact_icon} {currency_fa}\n"
         f"📌 {title_en}\n"
         f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
+        f"{status_line}"
         f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
+        f"ℹ️ {explanation}\n"
     )
 
 
@@ -652,7 +716,7 @@ async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        "🗓 تقویم اقتصادی\n\nاخبار مهم 🔴 و متوسط 🟠 ارزهای اصلی\nکدام بازه را می‌خواهی؟",
+        "🗓 تقویم اقتصادی\n\nاخبار مهم 🔴 ارزهای اصلی\nکدام بازه را می‌خواهی؟",
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -1093,9 +1157,16 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buf.seek(0)
     plt.close(fig)
 
+    asset_word = "طلا" if fund_type == "gold" else "نقره"
+    bubble_explainer = (
+        "💡 حباب یعنی چی؟\n"
+        f"وقتی قیمتی که یه صندوق {asset_word} توی بازار بورس معامله می‌شه، با ارزش واقعی {asset_word}ی که پشتشه یکی نباشه، "
+        "به این اختلاف «حباب» می‌گن. اگه حباب مثبت باشه یعنی صندوق گرون‌تر از ارزش واقعی داراییش معامله می‌شه؛ "
+        "اگه منفی باشه یعنی ارزون‌تر معامله می‌شه."
+    )
     await query.message.reply_photo(
         photo=buf,
-        caption=f"🫧 حباب صندوق‌های {label}",
+        caption=f"🫧 حباب صندوق‌های {label}\n\n{bubble_explainer}",
         reply_markup=keyboard,
     )
     return MAIN_MENU
