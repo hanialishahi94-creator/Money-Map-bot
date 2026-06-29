@@ -431,17 +431,27 @@ def calc_gold18(ounce_usd: float, dollar_toman: float) -> tuple[float, float]:
     return gram_usd, gram_toman
 
 
-def gold_result_text(ounce_usd: float, dollar_toman: float, source: str) -> str:
+def gold_result_text(ounce_usd: float, dollar_toman: float, source: str, market_price_toman: float | None = None) -> str:
     gram_usd, gram_toman = calc_gold18(ounce_usd, dollar_toman)
-    return (
+    text = (
         f"📊 ارزش واقعی طلای ۱۸ عیار {source}\n"
         f"{'─' * 32}\n"
         f"🔸 اونس جهانی: {ounce_usd:,.2f} دلار\n"
         f"🔸 نرخ دلار (بازار آزاد): {dollar_toman:,.0f} تومان\n"
         f"{'─' * 32}\n"
-        f"💰 ارزش هر گرم طلای ۱۸ عیار:\n"
+        f"💰 ارزش واقعی هر گرم طلای ۱۸ عیار:\n"
         f"   {gram_toman:,.0f} تومان"
     )
+    if market_price_toman:
+        bubble_pct = (market_price_toman - gram_toman) / gram_toman * 100
+        text += f"\n🏷️ قیمت بازار طلا: {market_price_toman:,.0f} تومان"
+        if bubble_pct > 0.05:
+            text += f"\n💬 الان طلا توی بازار حدود {bubble_pct:.1f}٪ گرون‌تر از ارزش واقعیشه."
+        elif bubble_pct < -0.05:
+            text += f"\n💬 الان طلا توی بازار حدود {abs(bubble_pct):.1f}٪ ارزون‌تر از ارزش واقعیشه."
+        else:
+            text += "\n💬 الان طلا توی بازار تقریباً برابر با ارزش واقعیشه."
+    return text
 
 
 # ===== ماشین حساب طلای ۱۸ عیار =====
@@ -468,6 +478,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ounce = await fetch_tgju_price("ons")
     dollar = await fetch_tgju_price("price_dollar_rl")
+    market_price_rial = await fetch_tgju_price("geram18")
 
     if not ounce or not dollar:
         await query.message.reply_text(
@@ -476,6 +487,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MAIN_MENU
 
     dollar_toman = dollar / 10
+    market_price_toman = (market_price_rial / 10) if market_price_rial else None
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی مجدد", callback_data="gold_live")],
@@ -483,7 +495,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        gold_result_text(ounce, dollar_toman, "لحظه‌ای"),
+        gold_result_text(ounce, dollar_toman, "لحظه‌ای", market_price_toman),
         reply_markup=keyboard,
     )
     return MAIN_MENU
