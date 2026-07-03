@@ -1693,6 +1693,7 @@ async def alert_asset_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     asset = query.data.replace("alert_asset_", "")
     info = ALERT_ASSET_INFO[asset]
     context.user_data["alert_asset"] = asset
+    await query.answer("⏳ در حال دریافت قیمت...")
     if asset in ("bitcoin", "ethereum"):
         current_price = await fetch_crypto_usd_price(info["symbol"])
     else:
