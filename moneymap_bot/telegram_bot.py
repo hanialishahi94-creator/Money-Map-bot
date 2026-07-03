@@ -65,9 +65,9 @@ ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOL
 ALERT_ASSET_INFO = {
     "gold":       {"label": "طلای ۱۸ عیار",       "emoji": "🥇", "symbol": "geram18",         "divisor": 10, "unit": "تومان"},
     "dollar":     {"label": "دلار آمریکا",          "emoji": "💵", "symbol": "price_dollar_rl", "divisor": 10, "unit": "تومان"},
-    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-bitcoin-irr", "divisor": 10, "unit": "تومان"},
+    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-bitcoin-usd", "divisor": 1,  "unit": "دلار"},
     "silver":     {"label": "نقره داخلی (هر گرم)", "emoji": "🥈", "symbol": "silver",          "divisor": 10, "unit": "تومان"},
-    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-ethereum-irr", "divisor": 10, "unit": "تومان"},
+    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-ethereum-usd", "divisor": 1,  "unit": "دلار"},
     "gold_ounce": {"label": "اونس جهانی طلا",       "emoji": "🌐", "symbol": "ons",            "divisor": 1,  "unit": "دلار"},
 }
 
@@ -1666,7 +1666,7 @@ async def alert_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🥇 طلای ۱۸ عیار", callback_data="alert_asset_gold")],
         [InlineKeyboardButton("💵 دلار آمریکا", callback_data="alert_asset_dollar")],
         [InlineKeyboardButton("₿ بیتکوین", callback_data="alert_asset_bitcoin")],
-        [InlineKeyboardButton("🥈 نقره داخلی", callback_data="alert_asset_silver")],
+
         [InlineKeyboardButton("Ξ اتریوم", callback_data="alert_asset_ethereum")],
         [InlineKeyboardButton("🌐 اونس جهانی طلا", callback_data="alert_asset_gold_ounce")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="alert_menu")],
