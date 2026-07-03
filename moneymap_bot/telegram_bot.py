@@ -1714,6 +1714,7 @@ async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ALERT_ENTER_PRICE
     context.user_data["alert_price"] = target_price
+    def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
