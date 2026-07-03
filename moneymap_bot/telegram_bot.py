@@ -1713,7 +1713,7 @@ async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ عدد معتبر نیست.\nقیمت هدف رو فقط به صورت عددی وارد کن (مثال: 5000000):"
         )
         return ALERT_ENTER_PRICE
-    context.user_data["alert_price"] =
+    context.user_data["alert_price"] = target_price
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
