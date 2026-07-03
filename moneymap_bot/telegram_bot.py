@@ -63,9 +63,12 @@ ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOL
 
 # ===== تنظیمات هشدار قیمت =====
 ALERT_ASSET_INFO = {
-    "gold":    {"label": "طلای ۱۸ عیار", "emoji": "🥇", "symbol": "geram18",         "divisor": 10, "unit": "تومان"},
-    "dollar":  {"label": "دلار آمریکا",    "emoji": "💵", "symbol": "price_dollar_rl", "divisor": 10, "unit": "تومان"},
-    "bitcoin": {"label": "بیتکوین",        "emoji": "₿",  "symbol": "crypto-btc-irr", "divisor": 10, "unit": "تومان"},
+    "gold":       {"label": "طلای ۱۸ عیار",       "emoji": "🥇", "symbol": "geram18",         "divisor": 10, "unit": "تومان"},
+    "dollar":     {"label": "دلار آمریکا",          "emoji": "💵", "symbol": "price_dollar_rl", "divisor": 10, "unit": "تومان"},
+    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-btc-irr", "divisor": 10, "unit": "تومان"},
+    "silver":     {"label": "نقره داخلی (هر گرم)", "emoji": "🥈", "symbol": "silver",          "divisor": 10, "unit": "تومان"},
+    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-eth-irr", "divisor": 10, "unit": "تومان"},
+    "gold_ounce": {"label": "اونس جهانی طلا",       "emoji": "🌐", "symbol": "ons",            "divisor": 1,  "unit": "دلار"},
 }
 
 
@@ -1631,14 +1634,14 @@ async def alert_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_count = db.count_active_alerts(user_id)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ هشدار جدید", callback_data="alert_new")],
-        [InlineKeyboardButton(f"📋 هشدارهای من ({active_count}/5)", callback_data="alert_list")],
+        [InlineKeyboardButton(f"📋 هشدارهای من ({active_count}/10)", callback_data="alert_list")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
         "🔔 هشدار قیمت\n\n"
         "می‌تونی روی هر دارایی یه قیمت هدف تعیین کنی.\n"
         "به محض رسیدن قیمت به اون هدف، بات بهت پیام می‌ده.\n\n"
-        f"هشدارهای فعال: {active_count}/5",
+        f"هشدارهای فعال: {active_count}/10",
         reply_markup=keyboard,
     )
     return MAIN_MENU
@@ -1648,13 +1651,13 @@ async def alert_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if db.count_active_alerts(user_id) >= 5:
+    if db.count_active_alerts(user_id) >= 10:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 مدیریت هشدارها", callback_data="alert_list")],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="alert_menu")],
         ])
         await query.message.reply_text(
-            "⚠️ حداکثر ۵ هشدار فعال می‌تونی داشته باشی.\n"
+            "⚠️ حداکثر ۱۰ هشدار فعال می‌تونی داشته باشی.\n"
             "اول یه هشدار قدیمی رو حذف کن، بعد هشدار جدید بذار.",
             reply_markup=keyboard,
         )
@@ -1663,6 +1666,9 @@ async def alert_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🥇 طلای ۱۸ عیار", callback_data="alert_asset_gold")],
         [InlineKeyboardButton("💵 دلار آمریکا", callback_data="alert_asset_dollar")],
         [InlineKeyboardButton("₿ بیتکوین", callback_data="alert_asset_bitcoin")],
+        [InlineKeyboardButton("🥈 نقره داخلی", callback_data="alert_asset_silver")],
+        [InlineKeyboardButton("Ξ اتریوم", callback_data="alert_asset_ethereum")],
+        [InlineKeyboardButton("🌐 اونس جهانی طلا", callback_data="alert_asset_gold_ounce")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="alert_menu")],
     ])
     await query.message.reply_text(
@@ -1724,43 +1730,83 @@ async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             direction = "below"
             dir_text = f"وقتی قیمت بیاد پایین‌تر از {target_price:,.0f} {info.get('unit', '')}"
+        # بررسی تلورانس ۲۰٪
+        diff_pct = abs(target_price - current) / current * 100
+        if diff_pct > 20:
+            context.user_data["alert_direction"] = direction
+            warn_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ بله، مطمئنم", callback_data="alert_confirm_price")],
+                [InlineKeyboardButton("❌ لغو", callback_data="alert_cancel")],
+            ])
+            await update.message.reply_text(
+                f"⚠️ قیمتی که زدی {diff_pct:.0f}٪ با قیمت فعلی فاصله داره!\n\n"
+                f"📊 قیمت فعلی: {current:,.0f} {info.get('unit', '')}\n"
+                f"🎯 قیمت هدف: {target_price:,.0f} {info.get('unit', '')}\n\n"
+                "مطمئنی این عدد درسته؟\n"
+                "(یا یه قیمت دیگه تایپ کن)",
+                reply_markup=warn_keyboard,
+            )
+            return ALERT_ENTER_PRICE
     else:
         direction = "above"
         dir_text = f"وقتی قیمت به {target_price:,.0f} {info.get('unit', '')} برسه"
     context.user_data["alert_direction"] = direction
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ پیام پیش‌فرض (بدون متن دلخواه)", callback_data="alert_default_msg")],
+        [InlineKeyboardButton("🔕 بدون پیام اضافه", callback_data="alert_default_msg")],
         [InlineKeyboardButton("❌ لغو", callback_data="alert_cancel")],
     ])
     await update.message.reply_text(
         f"✅ قیمت هدف: {target_price:,.0f} {info.get('unit', '')}\n"
         f"📣 شرط: {dir_text}\n\n"
-        "حالا یه متن دلخواه برای پیام هشدار بنویس\n"
-        "(یا روی دکمه پایین بزن تا از پیام پیش‌فرض استفاده بشه):",
+        "یه پیام برای هشدارت بنویس 👇\n"
+        "مثلاً: موقع فروش یا بررسی بازار\n\n"
+        "اگه پیام خاصی نمی‌خوای، دکمه زیر رو بزن:",
+        reply_markup=keyboard,
+    )
+    return ALERT_ENTER_MESSAGE
+
+
+async def alert_confirm_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """کاربر قیمت پرت را تایید کرد"""
+    query = update.callback_query
+    await query.answer()
+    asset = context.user_data.get("alert_asset", "")
+    info = ALERT_ASSET_INFO.get(asset, {})
+    target_price = context.user_data.get("alert_price", 0)
+    direction = context.user_data.get("alert_direction", "above")
+    dir_text = (
+        f"وقتی قیمت بره بالای {target_price:,.0f} {info.get('unit', '')}"
+        if direction == "above"
+        else f"وقتی قیمت بیاد پایین‌تر از {target_price:,.0f} {info.get('unit', '')}"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔕 بدون پیام اضافه", callback_data="alert_default_msg")],
+        [InlineKeyboardButton("❌ لغو", callback_data="alert_cancel")],
+    ])
+    await query.message.reply_text(
+        f"✅ قیمت هدف تایید شد: {target_price:,.0f} {info.get('unit', '')}\n"
+        f"📣 شرط: {dir_text}\n\n"
+        "یه پیام برای هشدارت بنویس 👇\n"
+        "مثلاً: موقع فروش یا بررسی بازار\n\n"
+        "اگه پیام خاصی نمی‌خوای، دکمه زیر رو بزن:",
         reply_markup=keyboard,
     )
     return ALERT_ENTER_MESSAGE
 
 
 async def alert_default_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """کاربر بدون پیام اضافه انتخاب کرد"""
     query = update.callback_query
     await query.answer()
-    asset = context.user_data.get("alert_asset", "")
-    info = ALERT_ASSET_INFO.get(asset, {})
-    target_price = context.user_data.get("alert_price", 0)
-    default_msg = (
-        f"🔔 هشدار قیمت!\n"
-        f"{info.get('emoji', '')} {info.get('label', '')} به "
-        f"{target_price:,.0f} {info.get('unit', '')} رسید."
-    )
-    await _save_price_alert(update, context, default_msg, via_callback=True)
+    await _save_price_alert(update, context, "", via_callback=True)
     return MAIN_MENU
 
 
 async def alert_get_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت متن دلخواه پیام هشدار از کاربر"""
     message_text = update.message.text.strip()
     if not message_text:
-        await update.message.reply_text("⚠️ متن پیام نمی‌تونه خالی باشه. دوباره بنویس:")
+        await update.message.reply_text("متن پیام نمیتونه خالی باشه. دوباره بنویس:")
         return ALERT_ENTER_MESSAGE
     await _save_price_alert(update, context, message_text, via_callback=False)
     return MAIN_MENU
@@ -1772,9 +1818,9 @@ async def _save_price_alert(update, context, message_text: str, via_callback: bo
     target_price = context.user_data.get("alert_price", 0)
     direction = context.user_data.get("alert_direction", "above")
     info = ALERT_ASSET_INFO.get(asset, {})
-    if db.count_active_alerts(user_id) >= 5:
-        msg = "⚠️ به حداکثر ۵ هشدار فعال رسیدی. اول یه هشدار قدیمی حذف کن."
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📋 هشدارهای من", callback_data="alert_list")]])
+    if db.count_active_alerts(user_id) >= 10:
+        msg = "به حداکثر ۱۰ هشدار فعال رسیدی. اول یه هشدار قدیمی حذف کن."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("هشدارهای من", callback_data="alert_list")]])
         if via_callback:
             await update.callback_query.message.reply_text(msg, reply_markup=keyboard)
         else:
@@ -1787,7 +1833,7 @@ async def _save_price_alert(update, context, message_text: str, via_callback: bo
         f"📊 دارایی: {info.get('emoji', '')} {info.get('label', '')}\n"
         f"🎯 قیمت هدف: {target_price:,.0f} {info.get('unit', '')}\n"
         f"📣 شرط: {dir_text} قیمت هدف\n"
-        f"💬 پیام: {message_text[:80]}"
+        f"💬 پیام: {'(بدون پیام)' if not message_text else message_text[:80]}"
     )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔔 هشدارهای من", callback_data="alert_list")],
@@ -1817,7 +1863,7 @@ async def alert_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard,
         )
         return MAIN_MENU
-    text = f"🔔 هشدارهای فعال شما ({len(alerts)}/5):\n\n"
+    text = f"🔔 هشدارهای فعال شما ({len(alerts)}/10):\n\n"
     for i, a in enumerate(alerts, 1):
         info = ALERT_ASSET_INFO.get(a["asset"], {})
         dir_text = "⬆️ بالاتر از" if a["direction"] == "above" else "⬇️ پایین‌تر از"
@@ -1851,7 +1897,7 @@ async def alert_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await query.message.reply_text("✅ هشدار حذف شد.\nهیچ هشدار فعال دیگه‌ای نداری.", reply_markup=keyboard)
         return MAIN_MENU
-    text = f"✅ هشدار حذف شد.\n\n🔔 هشدارهای فعال ({len(alerts)}/5):\n\n"
+    text = f"✅ هشدار حذف شد.\n\n🔔 هشدارهای فعال ({len(alerts)}/10):\n\n"
     for i, a in enumerate(alerts, 1):
         info = ALERT_ASSET_INFO.get(a["asset"], {})
         dir_text = "⬆️ بالاتر از" if a["direction"] == "above" else "⬇️ پایین‌تر از"
@@ -1881,6 +1927,7 @@ async def alert_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
+    """جاب دوره‌ای: بررسی هشدارهای قیمت هر ۵ دقیقه"""
     alerts = db.get_all_active_alerts()
     if not alerts:
         return
@@ -1902,13 +1949,14 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
             db.mark_alert_triggered(alert["id"])
             info = ALERT_ASSET_INFO.get(asset, {})
             try:
+                msg_extra = f"\n\n{alert['message']}" if alert['message'] else ""
                 await context.bot.send_message(
                     chat_id=alert["user_id"],
                     text=(
                         f"🔔 هشدار قیمت!\n\n"
                         f"{info.get('emoji', '')} {info.get('label', '')}: "
-                        f"{current_price:,.0f} {info.get('unit', '')}\n\n"
-                        f"{alert['message']}"
+                        f"{current_price:,.0f} {info.get('unit', '')}"
+                        + msg_extra
                     ),
                 )
             except Exception as e:
@@ -1946,15 +1994,15 @@ def main():
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
                 CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
                 CallbackQueryHandler(alert_new, pattern="^alert_new$"),
-                CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin)$"),
+                CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|silver|ethereum|gold_ounce)$"),
                 CallbackQueryHandler(alert_list, pattern="^alert_list$"),
                 CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"),
                 CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
                 CallbackQueryHandler(alert_default_msg, pattern="^alert_default_msg$"),
-                CallbackQueryHandler(support_menu, pattern="^support_menu$"),
             ],
             ALERT_ENTER_PRICE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_price),
+                CallbackQueryHandler(alert_confirm_price, pattern="^alert_confirm_price$"),
                 CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
             ],
             ALERT_ENTER_MESSAGE: [
@@ -1988,31 +2036,26 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"))
     app.add_handler(CallbackQueryHandler(vip_pay, pattern="^vip_pay$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
-    app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
-    app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
-    app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin)$"))
-    app.add_handler(CallbackQueryHandler(alert_list, pattern="^alert_list$"))
-    app.add_handler(CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"))
-    app.add_handler(CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"))
-    app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
-    app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY & filters.TEXT, support_group_reply))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
-    app.add_handler(CommandHandler("whereami", whereami_command))
+    app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
+    app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
+    app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|silver|ethereum|gold_ounce)$"))
+    app.add_handler(CallbackQueryHandler(alert_list, pattern="^alert_list$"))
+    app.add_handler(CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"))
+    app.add_handler(CallbackQueryHandler(alert_confirm_price, pattern="^alert_confirm_price$"))
+    app.add_handler(CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"))
     app.add_handler(CommandHandler("approve", approve_vip))
     app.add_handler(CommandHandler("reject", reject_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_vip))
-    # global handler برای دریافت رسید VIP (خارج از conversation)
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
-    # اگه به‌جای عکس، چیز دیگه‌ای فرستاد در حالی که منتظر رسیدش هستیم
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.PHOTO, handle_non_photo_while_waiting_receipt))
-    # جاب دوره‌ای بررسی اتمام اشتراک VIP (هر ۱ ساعت یک‌بار)
     if app.job_queue is not None:
         app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
         app.job_queue.run_repeating(check_price_alerts, interval=300, first=60)
     else:
-        logger.warning("⚠️ job_queue فعال نیست — یادآوری‌های VIP کار نمی‌کنند. پکیج python-telegram-bot[job-queue] را نصب کنید.")
+        logger.warning("job_queue فعال نیست")
     logger.info("✅ ربات در حال اجراست...")
     app.run_polling()
 
