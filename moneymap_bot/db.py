@@ -105,6 +105,21 @@ def init_db():
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS price_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                asset TEXT NOT NULL,
+                target_price REAL NOT NULL,
+                direction TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                triggered INTEGER DEFAULT 0
+            )
+            """
+        )
+
         # مقداردهی اولیه تحلیل‌ها در صورت خالی بودن جدول
         existing = conn.execute("SELECT asset FROM analyses").fetchall()
         existing_assets = {row["asset"] for row in existing}
@@ -399,6 +414,59 @@ def get_vip_days(default: int = 30):
         return int(float(val)) if val is not None else default
     except (TypeError, ValueError):
         return default
+
+
+# ---------- هشدار قیمت ----------
+
+def add_price_alert(user_id: int, asset: str, target_price: float, direction: str, message: str) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO price_alerts (user_id, asset, target_price, direction, message, created_at, triggered) VALUES (?, ?, ?, ?, ?, ?, 0)",
+            (user_id, asset, target_price, direction, message, time.time()),
+        )
+        return cur.lastrowid
+
+
+def get_active_alerts_for_user(user_id: int):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM price_alerts WHERE user_id = ? AND triggered = 0 ORDER BY created_at ASC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_all_active_alerts():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM price_alerts WHERE triggered = 0"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_price_alert(alert_id: int, user_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM price_alerts WHERE id = ? AND user_id = ?",
+            (alert_id, user_id),
+        )
+
+
+def mark_alert_triggered(alert_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE price_alerts SET triggered = 1 WHERE id = ?",
+            (alert_id,),
+        )
+
+
+def count_active_alerts(user_id: int) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM price_alerts WHERE user_id = ? AND triggered = 0",
+            (user_id,),
+        ).fetchone()
+        return row["cnt"] if row else 0
 
 
 # هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند

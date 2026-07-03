@@ -59,7 +59,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # توجه: کاربران و اعضای VIP حالا در دیتابیس (db.py) ذخیره می‌شوند، نه در حافظه.
-ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOLLAR, VIP_RECEIPT = range(7)
+ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOLLAR, VIP_RECEIPT, ALERT_ENTER_PRICE, ALERT_ENTER_MESSAGE = range(9)
+
+# ===== تنظیمات هشدار قیمت =====
+ALERT_ASSET_INFO = {
+    "gold":    {"label": "طلای ۱۸ عیار", "emoji": "🥇", "symbol": "geram18",         "divisor": 10, "unit": "تومان"},
+    "dollar":  {"label": "دلار آمریکا",    "emoji": "💵", "symbol": "price_dollar_rl", "divisor": 10, "unit": "تومان"},
+    "bitcoin": {"label": "بیتکوین",        "emoji": "₿",  "symbol": "crypto-btc-irr", "divisor": 10, "unit": "تومان"},
+}
 
 
 # ===== چک کردن عضویت کانال =====
@@ -310,6 +317,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
         [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
+        [InlineKeyboardButton("🔔 هشدار قیمت", callback_data="alert_menu")],
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
         [InlineKeyboardButton("📞 پشتیبانی", callback_data="support_menu")],
     ])
@@ -1612,7 +1620,100 @@ async def whereami_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🆔 آیدی همین چت/گروه: {update.effective_chat.id}")
 
 
-def main():
+# ===================================================================
+# 🔔 هشدار قیمت — Price Alert System
+# ===================================================================
+
+async def alert_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    active_count = db.count_active_alerts(user_id)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ هشدار جدید", callback_data="alert_new")],
+        [InlineKeyboardButton(f"📋 هشدارهای من ({active_count}/5)", callback_data="alert_list")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(
+        "🔔 هشدار قیمت\n\n"
+        "می‌تونی روی هر دارایی یه قیمت هدف تعیین کنی.\n"
+        "به محض رسیدن قیمت به اون هدف، بات بهت پیام می‌ده.\n\n"
+        f"هشدارهای فعال: {active_count}/5",
+        reply_markup=keyboard,
+    )
+    return MAIN_MENU
+
+
+async def alert_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    if db.count_active_alerts(user_id) >= 5:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 مدیریت هشدارها", callback_data="alert_list")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="alert_menu")],
+        ])
+        await query.message.reply_text(
+            "⚠️ حداکثر ۵ هشدار فعال می‌تونی داشته باشی.\n"
+            "اول یه هشدار قدیمی رو حذف کن، بعد هشدار جدید بذار.",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🥇 طلای ۱۸ عیار", callback_data="alert_asset_gold")],
+        [InlineKeyboardButton("💵 دلار آمریکا", callback_data="alert_asset_dollar")],
+        [InlineKeyboardButton("₿ بیتکوین", callback_data="alert_asset_bitcoin")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="alert_menu")],
+    ])
+    await query.message.reply_text(
+        "روی کدوم دارایی می‌خوای هشدار قیمت بذاری؟",
+        reply_markup=keyboard,
+    )
+    return MAIN_MENU
+
+
+async def alert_asset_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    asset = query.data.replace("alert_asset_", "")
+    info = ALERT_ASSET_INFO[asset]
+    context.user_data["alert_asset"] = asset
+    price_raw = await fetch_tgju_price(info["symbol"])
+    if price_raw:
+        current_price = price_raw / info["divisor"]
+        context.user_data["alert_current_price"] = current_price
+        price_text = f"قیمت فعلی: {current_price:,.0f} {info['unit']}"
+    else:
+        context.user_data["alert_current_price"] = None
+        price_text = "قیمت فعلی: در دسترس نیست"
+    cancel_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ لغو", callback_data="alert_cancel")],
+    ])
+    await query.message.reply_text(
+        f"🔔 هشدار برای {info['emoji']} {info['label']}\n\n"
+        f"{price_text}\n\n"
+        f"قیمت هدف رو به {info['unit']} وارد کن:\n"
+        f"(فقط عدد بنویس — مثال: 5000000)",
+        reply_markup=cancel_kb,
+    )
+    return ALERT_ENTER_PRICE
+
+
+async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().replace(",", "").replace("،", "").replace(" ", "")
+    persian_digits = "۰۱۲۳۴۵۶۷۸۹"
+    for i, d in enumerate(persian_digits):
+        text = text.replace(d, str(i))
+    try:
+        target_price = float(text)
+        if target_price <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(
+            "⚠️ عدد معتبر نیست.\nقیمت هدف رو فقط به صورت عددی وارد کن (مثال: 5000000):"
+        )
+        return ALERT_ENTER_PRICE
+    context.user_data["alert_price"] =
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -1641,7 +1742,23 @@ def main():
                 CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"),
                 CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
+                CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
+                CallbackQueryHandler(alert_new, pattern="^alert_new$"),
+                CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin)$"),
+                CallbackQueryHandler(alert_list, pattern="^alert_list$"),
+                CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"),
+                CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
+                CallbackQueryHandler(alert_default_msg, pattern="^alert_default_msg$"),
                 CallbackQueryHandler(support_menu, pattern="^support_menu$"),
+            ],
+            ALERT_ENTER_PRICE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_price),
+                CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
+            ],
+            ALERT_ENTER_MESSAGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_message),
+                CallbackQueryHandler(alert_default_msg, pattern="^alert_default_msg$"),
+                CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
             ],
             GOLD_CALC_OUNCE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_ounce),
@@ -1669,6 +1786,12 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"))
     app.add_handler(CallbackQueryHandler(vip_pay, pattern="^vip_pay$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
+    app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
+    app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
+    app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin)$"))
+    app.add_handler(CallbackQueryHandler(alert_list, pattern="^alert_list$"))
+    app.add_handler(CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"))
+    app.add_handler(CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"))
     app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY & filters.TEXT, support_group_reply))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
@@ -1685,6 +1808,7 @@ def main():
     # جاب دوره‌ای بررسی اتمام اشتراک VIP (هر ۱ ساعت یک‌بار)
     if app.job_queue is not None:
         app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
+        app.job_queue.run_repeating(check_price_alerts, interval=300, first=60)
     else:
         logger.warning("⚠️ job_queue فعال نیست — یادآوری‌های VIP کار نمی‌کنند. پکیج python-telegram-bot[job-queue] را نصب کنید.")
     logger.info("✅ ربات در حال اجراست...")
