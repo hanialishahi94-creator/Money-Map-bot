@@ -1681,10 +1681,10 @@ async def alert_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def fetch_crypto_usd_price(irr_symbol: str) -> float | None:
     """قیمت کریپتو به دلار = قیمت ریالی ÷ نرخ دلار ریالی"""
     raw_crypto = await fetch_tgju_price(irr_symbol)
-    raw_dollar = await fetch_tgju_price("price_dollar_rl")
-    if not raw_crypto or not raw_dollar:
+    raw_tether = await fetch_tgju_price("crypto-tether-irr")
+    if not raw_crypto or not raw_tether:
         return None
-    return raw_crypto / raw_dollar
+    return raw_crypto / raw_tether
 
 
 async def alert_asset_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1693,7 +1693,7 @@ async def alert_asset_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     asset = query.data.replace("alert_asset_", "")
     info = ALERT_ASSET_INFO[asset]
     context.user_data["alert_asset"] = asset
-    await query.answer("⏳ در حال دریافت قیمت...")
+    loading_msg = await query.message.reply_text("⏳ در حال دریافت قیمت، لطفاً صبر کن...")
     if asset in ("bitcoin", "ethereum"):
         current_price = await fetch_crypto_usd_price(info["symbol"])
     else:
@@ -1708,6 +1708,7 @@ async def alert_asset_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     cancel_kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("❌ لغو", callback_data="alert_cancel")],
     ])
+    await loading_msg.delete()
     await query.message.reply_text(
         f"🔔 هشدار برای {info['emoji']} {info['label']}\n\n"
         f"{price_text}\n\n"
