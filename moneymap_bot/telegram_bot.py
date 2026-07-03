@@ -65,9 +65,9 @@ ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOL
 ALERT_ASSET_INFO = {
     "gold":       {"label": "طلای ۱۸ عیار",       "emoji": "🥇", "symbol": "geram18",         "divisor": 10, "unit": "تومان"},
     "dollar":     {"label": "دلار آمریکا",          "emoji": "💵", "symbol": "price_dollar_rl", "divisor": 10, "unit": "تومان"},
-    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-bitcoin-usd", "divisor": 1,  "unit": "دلار"},
+    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-bitcoin-irr", "divisor": 10, "unit": "دلار"},
     "silver":     {"label": "نقره داخلی (هر گرم)", "emoji": "🥈", "symbol": "silver",          "divisor": 10, "unit": "تومان"},
-    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-ethereum-usd", "divisor": 1,  "unit": "دلار"},
+    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-ethereum-irr", "divisor": 10, "unit": "دلار"},
     "gold_ounce": {"label": "اونس جهانی طلا",       "emoji": "🌐", "symbol": "ons",            "divisor": 1,  "unit": "دلار"},
 }
 
@@ -1678,15 +1678,27 @@ async def alert_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
+async def fetch_crypto_usd_price(irr_symbol: str) -> float | None:
+    """قیمت کریپتو به دلار = قیمت ریالی ÷ نرخ دلار ریالی"""
+    raw_crypto = await fetch_tgju_price(irr_symbol)
+    raw_dollar = await fetch_tgju_price("price_dollar_rl")
+    if not raw_crypto or not raw_dollar:
+        return None
+    return raw_crypto / raw_dollar
+
+
 async def alert_asset_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     asset = query.data.replace("alert_asset_", "")
     info = ALERT_ASSET_INFO[asset]
     context.user_data["alert_asset"] = asset
-    price_raw = await fetch_tgju_price(info["symbol"])
-    if price_raw:
-        current_price = price_raw / info["divisor"]
+    if asset in ("bitcoin", "ethereum"):
+        current_price = await fetch_crypto_usd_price(info["symbol"])
+    else:
+        price_raw = await fetch_tgju_price(info["symbol"])
+        current_price = price_raw / info["divisor"] if price_raw else None
+    if current_price:
         context.user_data["alert_current_price"] = current_price
         price_text = f"قیمت فعلی: {current_price:,.0f} {info['unit']}"
     else:
@@ -1933,9 +1945,13 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
         return
     prices = {}
     for asset, info in ALERT_ASSET_INFO.items():
-        raw = await fetch_tgju_price(info["symbol"])
-        if raw:
-            prices[asset] = raw / info["divisor"]
+        if asset in ("bitcoin", "ethereum"):
+            price = await fetch_crypto_usd_price(info["symbol"])
+        else:
+            raw = await fetch_tgju_price(info["symbol"])
+            price = raw / info["divisor"] if raw else None
+        if price:
+            prices[asset] = price
     for alert in alerts:
         asset = alert["asset"]
         current_price = prices.get(asset)
