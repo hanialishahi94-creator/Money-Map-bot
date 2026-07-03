@@ -65,9 +65,9 @@ ASK_NAME, ASK_PHONE, CHECK_MEMBERSHIP, MAIN_MENU, GOLD_CALC_OUNCE, GOLD_CALC_DOL
 ALERT_ASSET_INFO = {
     "gold":       {"label": "طلای ۱۸ عیار",       "emoji": "🥇", "symbol": "geram18",         "divisor": 10, "unit": "تومان"},
     "dollar":     {"label": "دلار آمریکا",          "emoji": "💵", "symbol": "price_dollar_rl", "divisor": 10, "unit": "تومان"},
-    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-btc-irr", "divisor": 10, "unit": "تومان"},
+    "bitcoin":    {"label": "بیتکوین",              "emoji": "₿",  "symbol": "crypto-bitcoin-irr", "divisor": 10, "unit": "تومان"},
     "silver":     {"label": "نقره داخلی (هر گرم)", "emoji": "🥈", "symbol": "silver",          "divisor": 10, "unit": "تومان"},
-    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-eth-irr", "divisor": 10, "unit": "تومان"},
+    "ethereum":   {"label": "اتریوم",               "emoji": "Ξ",  "symbol": "crypto-ethereum-irr", "divisor": 10, "unit": "تومان"},
     "gold_ounce": {"label": "اونس جهانی طلا",       "emoji": "🌐", "symbol": "ons",            "divisor": 1,  "unit": "دلار"},
 }
 
@@ -1994,7 +1994,7 @@ def main():
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
                 CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
                 CallbackQueryHandler(alert_new, pattern="^alert_new$"),
-                CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|silver|ethereum|gold_ounce)$"),
+                CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"),
                 CallbackQueryHandler(alert_list, pattern="^alert_list$"),
                 CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"),
                 CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
@@ -2040,7 +2040,7 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
     app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
     app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
-    app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|silver|ethereum|gold_ounce)$"))
+    app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"))
     app.add_handler(CallbackQueryHandler(alert_list, pattern="^alert_list$"))
     app.add_handler(CallbackQueryHandler(alert_delete, pattern="^alert_del_\\d+$"))
     app.add_handler(CallbackQueryHandler(alert_confirm_price, pattern="^alert_confirm_price$"))
