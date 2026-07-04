@@ -391,7 +391,8 @@ async def fetch_market_sentiment() -> str:
                         f"  Short `{short_bar}` {short_pct}%\n"
                     )
                 lines.append("🕐 _آپدیت لحظه\u200cای_")
-                return "\n".join(lines)
+                lines.append("📌 سنتیمنت = موضع واقعی معامله‌گران | بیشتر از ۶۵٪ Long یا Short → بازار در ناحیه اشباعه\n")
+        return "\n".join(lines)
     except Exception as e:
         logger.error(f"[sentiment] خطا: {e}")
         return "❌ خطا در دریافت سنتیمنت"
