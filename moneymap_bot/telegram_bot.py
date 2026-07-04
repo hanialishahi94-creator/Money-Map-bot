@@ -400,7 +400,7 @@ async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("⏳ در حال دریافت داده...")
     text = await fetch_market_sentiment()
- _note = (
+_note = (
         "راهنمای استفاده از سنتیمنت:\n\n"
         "داده\u200cی سنتیمنت (Long/Short Ratio) در واقع نشون می\u200cده چند درصد از "
         "معامله\u200cگرها لانگ هستن و چند درصد شورت؛ "
