@@ -336,7 +336,9 @@ async def get_myfxbook_session() -> str | None:
     if _myfxbook_session["token"]:
         return _myfxbook_session["token"]
     import aiohttp
-    url = f"https://www.myfxbook.com/api/login.json?email={MYFXBOOK_EMAIL}&password={MYFXBOOK_PASSWORD}"
+    from urllib.parse import urlencode
+    params = urlencode({"email": MYFXBOOK_EMAIL, "password": MYFXBOOK_PASSWORD})
+    url = f"https://www.myfxbook.com/api/login.json?{params}"
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
