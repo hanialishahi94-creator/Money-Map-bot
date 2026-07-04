@@ -409,7 +409,7 @@ async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "برعکسش هم وقتی شورت‌ها زیاد میشن، بازار ممکنه به سمت بالا حرکت کنه.\n\n"
         "در عمل، از این دیتا بیشتر برای تشخیص اشباع احساسات (crowd positioning) استفاده می‌کنیم، نه جهت قطعی؛ "
         "یعنی وقتی اکثریت خیلی یک‌طرفه شدن، باید حواست به حرکت خلاف انتظار بازار باشه."
-    )join(lines)
+    )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="sentiment_menu")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
