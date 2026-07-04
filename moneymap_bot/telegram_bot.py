@@ -365,13 +365,13 @@ async def fetch_market_sentiment() -> str:
                 if data.get("error"):
                     _myfxbook_session["token"] = None
                     return "❌ session منقضی شد — دوباره امتحان کن."
-                symbols_data = {item["symbol"]: item for item in data.get("symbols", [])}
+                symbols_data = {item["name"]: item for item in data.get("symbols", [])}
                 lines = ["📊 *سنتیمنت معامله\u200cگران*\n"]
                 for sym, label in SENTIMENT_SYMBOLS:
                     item = symbols_data.get(sym)
                     if not item:
                         continue
-                    long_pct  = round(float(item["longsPercentage"]))
+                    long_pct  = round(float(item["longPercentage"]))
                     short_pct = 100 - long_pct
                     if long_pct >= 60:
                         color = "🔵"
