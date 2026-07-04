@@ -391,8 +391,7 @@ async def fetch_market_sentiment() -> str:
                         f"  Short `{short_bar}` {short_pct}%\n"
                     )
                 lines.append("🕐 _آپدیت لحظه\u200cای_")
-                lines.append("📌 سنتیمنت = موضع واقعی معامله‌گران | بیشتر از ۶۵٪ Long یا Short → بازار در ناحیه اشباعه\n")
-        return "\n".join(lines)
+                return "\n".join(lines)
     except Exception as e:
         logger.error(f"[sentiment] خطا: {e}")
         return "❌ خطا در دریافت سنتیمنت"
@@ -401,12 +400,22 @@ async def fetch_market_sentiment() -> str:
 async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("⏳ در حال دریافت داده...")
-    text = await fetch_market_sentiment()
+    return "\n".text = await fetch_market_sentiment()
+    _note = (
+        "داده‌ی سنتیمنت (Long/Short Ratio) در واقع نشون می‌ده چند درصد از معامله‌گرها لانگ هستن "
+        "و چند درصد شورت؛ یعنی یه تصویر سریع از احساس غالب بازار بهت می‌ده.\n\n"
+        "وقتی مثلاً بالای ۶۵٪ لانگ باشه، یعنی اکثر تریدرها به رشد قیمت امیدوارن و بازار به سمت "
+        "«هیجانی شدن لانگ‌ها» رفته که معمولاً می‌تونه یه هشدار باشه برای اصلاح یا شکار لیکوییدیشن لانگ‌ها. "
+        "برعکسش هم وقتی شورت‌ها زیاد میشن، بازار ممکنه به سمت بالا حرکت کنه.\n\n"
+        "در عمل، از این دیتا بیشتر برای تشخیص اشباع احساسات (crowd positioning) استفاده می‌کنیم، نه جهت قطعی؛ "
+        "یعنی وقتی اکثریت خیلی یک‌طرفه شدن، باید حواست به حرکت خلاف انتظار بازار باشه."
+    )join(lines)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="sentiment_menu")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    await context.bot.send_message(chat_id=query.message.chat_id, text=_note)
     return MAIN_MENU
 
 
