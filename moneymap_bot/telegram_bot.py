@@ -366,7 +366,11 @@ async def fetch_market_sentiment() -> str:
                     _myfxbook_session["token"] = None
                     return "❌ session منقضی شد — دوباره امتحان کن."
                 symbols_data = {item["name"]: item for item in data.get("symbols", [])}
-                lines = ["📊 *سنتیمنت معامله\u200cگران*\n"]
+                lines = [
+                    "📊 *سنتیمنت معامله\u200cگران*\n",
+                    "این داده نشون می\u200cده معامله\u200cگران در لحظه چه موضعی دارن — نه توصیه خرید/فروش\\.\n"
+                    "درصد بالای Long یا Short لزوماً جهت بازار رو نشون نمیده و برخی تریدرها از این داده به عنوان *سیگنال معکوس* استفاده می\u200cکنن\\.\n",
+                ]
                 for sym, label in SENTIMENT_SYMBOLS:
                     item = symbols_data.get(sym)
                     if not item:
@@ -386,7 +390,7 @@ async def fetch_market_sentiment() -> str:
                         f"  Long  `{long_bar}` {long_pct}%\n"
                         f"  Short `{short_bar}` {short_pct}%\n"
                     )
-                lines.append("🕐 _داده\u200cهای لحظه\u200cای · Myfxbook_")
+                lines.append("🕐 _آپدیت لحظه\u200cای_")
                 return "\n".join(lines)
     except Exception as e:
         logger.error(f"[sentiment] خطا: {e}")
