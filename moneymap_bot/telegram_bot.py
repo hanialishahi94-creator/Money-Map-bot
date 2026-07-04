@@ -368,8 +368,7 @@ async def fetch_market_sentiment() -> str:
                 symbols_data = {item["name"]: item for item in data.get("symbols", [])}
                 lines = [
                     "📊 *سنتیمنت معامله\u200cگران*\n",
-                    "این داده نشون می\u200cده معامله\u200cگران در لحظه چه موضعی دارن — نه توصیه خرید/فروش\\.\n"
-                    "درصد بالای Long یا Short لزوماً جهت بازار رو نشون نمیده و برخی تریدرها از این داده به عنوان *سیگنال معکوس* استفاده می\u200cکنن\\.\n",
+                    
                 ]
                 for sym, label in SENTIMENT_SYMBOLS:
                     item = symbols_data.get(sym)
@@ -402,7 +401,7 @@ async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("⏳ در حال دریافت داده...")
     text = await fetch_market_sentiment()
     _note = (
-        "داده‌ی سنتیمنت (Long/Short Ratio) در واقع نشون می‌ده چند درصد از معامله‌گرها لانگ هستن "
+        )"راهنمای استفاده از سنتیمنت:\n\nداده‌ی سنتیمنت (Long/Short Ratio) در واقع نشون می‌ده چند درصد از معامله‌گرها لانگ هستن "
         "و چند درصد شورت؛ یعنی یه تصویر سریع از احساس غالب بازار بهت می‌ده.\n\n"
         "وقتی مثلاً بالای ۶۵٪ لانگ باشه، یعنی اکثر تریدرها به رشد قیمت امیدوارن و بازار به سمت "
         "«هیجانی شدن لانگ‌ها» رفته که معمولاً می‌تونه یه هشدار باشه برای اصلاح یا شکار لیکوییدیشن لانگ‌ها. "
