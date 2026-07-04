@@ -314,12 +314,102 @@ async def check_membership_callback(update: Update, context: ContextTypes.DEFAUL
         return CHECK_MEMBERSHIP
 
 
+# ===== سنتیمنت بازار (Myfxbook) =====
+MYFXBOOK_EMAIL    = os.environ.get("MYFXBOOK_EMAIL", "")
+MYFXBOOK_PASSWORD = os.environ.get("MYFXBOOK_PASSWORD", "")
+
+SENTIMENT_SYMBOLS = [
+    ("EURUSD", "EUR/USD"),
+    ("GBPUSD", "GBP/USD"),
+    ("USDJPY", "USD/JPY"),
+    ("AUDUSD", "AUD/USD"),
+    ("USDCAD", "USD/CAD"),
+    ("XAUUSD", "XAU/USD 🥇 طلا"),
+    ("XAGUSD", "XAG/USD 🥈 نقره"),
+    ("BTCUSD", "BTC/USD ₿ بیتکوین"),
+]
+
+_myfxbook_session = {"token": None}
+
+
+async def get_myfxbook_session() -> str | None:
+    if _myfxbook_session["token"]:
+        return _myfxbook_session["token"]
+    import aiohttp
+    url = f"https://www.myfxbook.com/api/login.json?email={MYFXBOOK_EMAIL}&password={MYFXBOOK_PASSWORD}"
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                data = await r.json(content_type=None)
+                if not data.get("error"):
+                    _myfxbook_session["token"] = data["session"]
+                    return _myfxbook_session["token"]
+                logger.error(f"[myfxbook] خطای لاگین: {data.get('message')}")
+    except Exception as e:
+        logger.error(f"[myfxbook] استثنا: {e}")
+    return None
+
+
+async def fetch_market_sentiment() -> str:
+    import aiohttp
+    session = await get_myfxbook_session()
+    if not session:
+        return "❌ خطا در اتصال به Myfxbook — بررسی کن ایمیل/پسورد درسته."
+    url = f"https://www.myfxbook.com/api/get-community-outlook.json?session={session}"
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                data = await r.json(content_type=None)
+                if data.get("error"):
+                    _myfxbook_session["token"] = None
+                    return "❌ session منقضی شد — دوباره امتحان کن."
+                symbols_data = {item["symbol"]: item for item in data.get("symbols", [])}
+                lines = ["📊 *سنتیمنت معامله\u200cگران*\n"]
+                for sym, label in SENTIMENT_SYMBOLS:
+                    item = symbols_data.get(sym)
+                    if not item:
+                        continue
+                    long_pct  = round(float(item["longsPercentage"]))
+                    short_pct = 100 - long_pct
+                    if long_pct >= 60:
+                        color = "🔵"
+                    elif short_pct >= 60:
+                        color = "🔴"
+                    else:
+                        color = "🟡"
+                    long_bar  = "█" * (long_pct  // 10) + "░" * (10 - long_pct  // 10)
+                    short_bar = "█" * (short_pct // 10) + "░" * (10 - short_pct // 10)
+                    lines.append(
+                        f"{color} *{label}*\n"
+                        f"  Long  `{long_bar}` {long_pct}%\n"
+                        f"  Short `{short_bar}` {short_pct}%\n"
+                    )
+                lines.append("🕐 _داده\u200cهای لحظه\u200cای · Myfxbook_")
+                return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"[sentiment] خطا: {e}")
+        return "❌ خطا در دریافت سنتیمنت"
+
+
+async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("⏳ در حال دریافت داده...")
+    text = await fetch_market_sentiment()
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="sentiment_menu")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    return MAIN_MENU
+
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 تحلیل بازار", callback_data="analysis_menu")],
         [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
         [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
+        [InlineKeyboardButton("📈 سنتیمنت بازار", callback_data="sentiment_menu")],
         [InlineKeyboardButton("🔔 هشدار قیمت", callback_data="alert_menu")],
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
         [InlineKeyboardButton("📞 پشتیبانی", callback_data="support_menu")],
@@ -2010,6 +2100,7 @@ def main():
                 CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"),
                 CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
+                CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"),
                 CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
                 CallbackQueryHandler(alert_new, pattern="^alert_new$"),
                 CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"),
@@ -2056,6 +2147,7 @@ def main():
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
+    app.add_handler(CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"))
     app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
     app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
     app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"))
