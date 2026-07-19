@@ -473,7 +473,9 @@ async def fetch_all_car_prices():
     s, i, c = lines[:5], lines[5:10], lines[10:]
     return "\n".join([
         "🚗 *قیمت صفر پرفروش‌ها*",
-        "_منبع: همراه مکانیک_\n",
+        git add moneymap_bot/telegram_bot.py
+git commit -m "fix: remove source attribution from car prices"
+git push
         "🔵 *سایپا*", *s, "",
         "🟡 *ایران‌خودرو*", *i, "",
         "🔴 *چینی‌ها*", *c,
