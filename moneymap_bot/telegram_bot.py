@@ -357,7 +357,7 @@ async def get_myfxbook_session() -> str | None:
     if _myfxbook_session["token"]:
         return _myfxbook_session["token"]
     import aiohttp
-from bs4 import BeautifulSoup
+    from bs4 import BeautifulSoup
     from urllib.parse import urlencode
     params = urlencode({"email": MYFXBOOK_EMAIL, "password": MYFXBOOK_PASSWORD})
     url = f"https://www.myfxbook.com/api/login.json?{params}"
