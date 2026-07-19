@@ -25,25 +25,25 @@ VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
 
 CAR_PRICE_LIST = [
     # سایپا (5 مدل)
-    ("کوییک",              "https://www.hamrah-mechanic.com/carprice/saipa/quick/"),
-    ("شاهین",              "https://www.hamrah-mechanic.com/carprice/saipa/shahin/"),
-    ("تیبا",               "https://www.hamrah-mechanic.com/carprice/saipa/tiba/"),
-    ("ساینا",              "https://www.hamrah-mechanic.com/carprice/saipa/saina/"),
-    ("سهند",               "https://www.hamrah-mechanic.com/carprice/saipa/sahand/"),
+    ("کوییک",               "https://www.hamrah-mechanic.com/carprice/saipa/quick/"),
+    ("شاهین",               "https://www.hamrah-mechanic.com/carprice/saipa/shahin/"),
+    ("تیبا",                "https://www.hamrah-mechanic.com/carprice/saipa/tiba/"),
+    ("ساینا",               "https://www.hamrah-mechanic.com/carprice/saipa/saina/"),
+    ("سهند",                "https://www.hamrah-mechanic.com/carprice/saipa/sahand/"),
     # ایران‌خودرو (7 مدل)
-    ("دنا",                "https://www.hamrah-mechanic.com/carprice/irankhodro/dena/"),
-    ("دنا پلاس",           "https://www.hamrah-mechanic.com/carprice/irankhodro/denaplus/"),
-    ("تارا",               "https://www.hamrah-mechanic.com/carprice/irankhodro/tara/"),
-    ("۲۰۷ اتوماتیک",      "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207automatic/"),
-    ("۲۰۷ دنده‌ای تیپ ۵", "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207tip5/"),
-    ("۲۰۷ دنده‌ای تیپ ۳", "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207tip3/"),
-    ("رانا پلاس",          "https://www.hamrah-mechanic.com/carprice/irankhodro/runna/"),
-    # چینی‌ها (5 مدل) - ری‌را را به ایران‌خودرو منتقل نمی‌کنیم
-    ("ری‌را",              "https://www.hamrah-mechanic.com/carprice/irankhodro/reera/"),
-    ("هاوال H6",           "https://www.hamrah-mechanic.com/carprice/haval/h6/"),
-    ("جک J4",              "https://www.hamrah-mechanic.com/carprice/jac/j4kermanmotor/"),
-    ("چانگان CS35",        "https://www.hamrah-mechanic.com/carprice/changan/cs35%20plus/"),
-    ("ام‌وی‌ام X22",       "https://www.hamrah-mechanic.com/carprice/mvm/mvmx22/"),
+    ("دنا",                 "https://www.hamrah-mechanic.com/carprice/irankhodro/dena/"),
+    ("دنا پلاس",            "https://www.hamrah-mechanic.com/carprice/irankhodro/denaplus/"),
+    ("تارا",                "https://www.hamrah-mechanic.com/carprice/irankhodro/tara/"),
+    ("۲۰۷ اتوماتیک",       "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207-automatic/"),
+    ("۲۰۷ دنده‌ای تیپ ۵",  "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207-tip5/"),
+    ("۲۰۷ دنده‌ای تیپ ۳",  "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207-tip3/"),
+    ("رانا پلاس",           "https://www.hamrah-mechanic.com/carprice/irankhodro/runna/"),
+    # چینی‌ها (5 مدل)
+    ("ری‌را",               "https://www.hamrah-mechanic.com/carprice/irankhodro/reera/"),
+    ("هاوال اچ‌شش",         "https://www.hamrah-mechanic.com/carprice/haval/h6/"),
+    ("جک جی‌فور",           "https://www.hamrah-mechanic.com/carprice/jac/j4kermanmotor/"),
+    ("چانگان سی‌اس۳۵",     "https://www.hamrah-mechanic.com/carprice/changan/cs35%20plus/"),
+    ("ام‌وی‌ام ایکس۲۲",    "https://www.hamrah-mechanic.com/carprice/mvm/mvmx22/"),
 ]
 
 
@@ -534,9 +534,9 @@ async def fetch_all_car_prices():
             diff = price - p_old
             pct  = diff / p_old * 100
             sign = "↑" if diff > 0 else "↓"
-            lines.append(f"‏• {name}: {fmt(price)} {sign}{fmt(abs(diff))} ({pct:+.1f}%)")
+            lines.append(f"• {name}: {fmt(price)} {sign}{fmt(abs(diff))} ({pct:+.1f}%)")
         else:
-            lines.append(f"‏• {name}: {fmt(price)}")
+            lines.append(f"• {name}: {fmt(price)}")
 
     if current:
         db.save_car_prices(current)
@@ -545,9 +545,9 @@ async def fetch_all_car_prices():
     s, i, c = lines[:5], lines[5:12], lines[12:]
     return "\n".join([
         "🚗 *قیمت صفر پرفروش‌ها*",
-        "‏🔵 *سایپا*", *s, "",
-        "‏🟡 *ایران‌خودرو*", *i, "",
-        "‏🔴 *چینی‌ها*", *c,
+        "🔵 *سایپا*", *s, "",
+        "🟡 *ایران‌خودرو*", *i, "",
+        "🔴 *چینی‌ها*", *c,
     ])
 
 
