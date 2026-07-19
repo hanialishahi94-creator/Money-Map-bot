@@ -34,9 +34,8 @@ CAR_PRICE_LIST = [
     ("دنا",                 "https://www.hamrah-mechanic.com/carprice/irankhodro/dena/"),
     ("دنا پلاس",            "https://www.hamrah-mechanic.com/carprice/irankhodro/denaplus/"),
     ("تارا",                "https://www.hamrah-mechanic.com/carprice/irankhodro/tara/"),
-    ("۲۰۷ اتوماتیک",       "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207-automatic/"),
-    ("۲۰۷ دنده‌ای تیپ ۵",  "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207-tip5/"),
-    ("۲۰۷ دنده‌ای تیپ ۳",  "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207-tip3/"),
+    ("۲۰۷ اتوماتیک",       "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207/1405/2884/"),
+    ("۲۰۷ دنده‌ای تیپ ۵",  "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207/1405/2874/?clr=ColorWhite"),
     ("رانا پلاس",           "https://www.hamrah-mechanic.com/carprice/irankhodro/runna/"),
     # چینی‌ها (5 مدل)
     ("ری‌را",               "https://www.hamrah-mechanic.com/carprice/irankhodro/reera/"),
@@ -541,8 +540,8 @@ async def fetch_all_car_prices():
     if current:
         db.save_car_prices(current)
 
-    # سایپا: 5 | ایران‌خودرو: 7 | چینی: 5
-    s, i, c = lines[:5], lines[5:12], lines[12:]
+    # سایپا: 5 | ایران‌خودرو: 6 | چینی: 5
+    s, i, c = lines[:5], lines[5:11], lines[11:]
     return "\n".join([
         "🚗 *قیمت صفر پرفروش‌ها*",
         "🔵 *سایپا*", *s, "",
