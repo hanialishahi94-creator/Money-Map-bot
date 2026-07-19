@@ -421,7 +421,7 @@ async def fetch_market_sentiment() -> str:
 async def fetch_one_car_price(session, name, url):
     try:
         import json
-      async with session.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, ssl=False) as r: 
+        async with session.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, ssl=False) as r: 
             html = await r.text()
         soup = BeautifulSoup(html, "html.parser")
         for script in soup.find_all("script", type="application/ld+json"):
