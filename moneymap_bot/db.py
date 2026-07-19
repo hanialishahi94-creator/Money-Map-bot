@@ -469,48 +469,50 @@ def count_active_alerts(user_id: int) -> int:
         return row["cnt"] if row else 0
 
 
-# هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند
-init_db()
+# ===== قیمت خودرو =====
 
 def save_car_prices(prices: dict):
-    conn = get_connection()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS car_price_history (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            car_name   TEXT    NOT NULL,
-            price      INTEGER,
-            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.executemany(
-        "INSERT INTO car_price_history (car_name, price) VALUES (?, ?)",
-        [(name, price) for name, price in prices.items()]
-    )
-    conn.commit()
-    conn.close()
-
-def get_previous_car_prices(hours_ago: int = 20):
-    try:
-        conn = get_connection()
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS car_price_history (
+    """ذخیره قیمت‌های فعلی خودرو (dict: {name: price})"""
+    now = time.time()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS car_prices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                car_name TEXT NOT NULL,
-                price INTEGER,
-                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                name TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                saved_at REAL NOT NULL
             )
-        """)
-        rows = conn.execute("""
-            SELECT car_name, price
-            FROM car_price_history
-            WHERE fetched_at = (
-                SELECT MAX(fetched_at)
-                FROM car_price_history AS h2
-                WHERE h2.car_name = car_price_history.car_name
-                  AND h2.fetched_at <= datetime('now', ?)
+            """
+        )
+        for name, price in prices.items():
+            conn.execute(
+                "INSERT INTO car_prices (name, price, saved_at) VALUES (?, ?, ?)",
+                (name, price, now),
             )
-        """, (f'-{hours_ago} hours',)).fetchall()
-        conn.close()
-        return {row[0]: row[1] for row in rows}
+
+
+def get_previous_car_prices(hours_ago: int = 20) -> dict:
+    """برگرداندن آخرین قیمت‌های ذخیره‌شده قبل از X ساعت پیش"""
+    cutoff = time.time() - hours_ago * 3600
+    result = {}
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT name, price FROM car_prices
+                WHERE saved_at <= ?
+                ORDER BY saved_at DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+            for row in rows:
+                if row["name"] not in result:
+                    result[row["name"]] = row["price"]
     except Exception:
-        return {}
+        pass
+    return result
+
+
+# هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند
+init_db()
