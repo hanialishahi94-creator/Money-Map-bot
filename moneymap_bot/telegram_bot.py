@@ -39,10 +39,10 @@ CAR_PRICE_LIST = [
     ("رانا پلاس",           "https://www.hamrah-mechanic.com/carprice/irankhodro/runna/"),
     # چینی‌ها (5 مدل)
     ("ری‌را",               "https://www.hamrah-mechanic.com/carprice/irankhodro/reera/"),
-    ("هاوال اچ‌شش",         "https://www.hamrah-mechanic.com/carprice/haval/h6/"),
-    ("جک جی‌فور",           "https://www.hamrah-mechanic.com/carprice/jac/j4kermanmotor/"),
-    ("چانگان سی‌اس۳۵",     "https://www.hamrah-mechanic.com/carprice/changan/cs35%20plus/"),
-    ("ام‌وی‌ام ایکس۲۲",    "https://www.hamrah-mechanic.com/carprice/mvm/mvmx22/"),
+    ("هاوال اچ ۶",          "https://www.hamrah-mechanic.com/carprice/haval/h6/"),
+    ("جک جی ۴",            "https://www.hamrah-mechanic.com/carprice/jac/j4kermanmotor/"),
+    ("چانگان سی‌اس ۳۵",    "https://www.hamrah-mechanic.com/carprice/changan/cs35%20plus/"),
+    ("ام‌وی‌ام ایکس ۲۲",   "https://www.hamrah-mechanic.com/carprice/mvm/mvmx22/"),
 ]
 
 
