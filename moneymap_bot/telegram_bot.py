@@ -418,36 +418,46 @@ async def fetch_market_sentiment() -> str:
         return "❌ خطا در دریافت سنتیمنت"
 
 
-async def fetch_one_car_price(session, name, url):
-    try:
-        import json
-        async with session.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, ssl=False) as r: 
-            html = await r.text()
-        soup = BeautifulSoup(html, "html.parser")
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and data.get("@type") == "Product":
-                    offers = data.get("offers", {})
-                    price = offers.get("price") or offers.get("lowPrice")
-                    if price:
-                        return (name, int(float(str(price).replace(",", ""))))
-            except Exception:
-                pass
-        m = re.search(r'([\d,]{7,})\s*تومان', html)
-        if m:
-            return (name, int(m.group(1).replace(",", "")))
-        return (name, None)
-    except Exception:
-        return (name, None)
-
-
 async def fetch_all_car_prices():
-    import aiohttp
-    timeout = aiohttp.ClientTimeout(total=10)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        all_tasks = [fetch_one_car_price(session, n, u) for n, u in CAR_PRICE_LIST]
-        results   = await asyncio.gather(*all_tasks)
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    def scrape_one(name, url):
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "windows", "mobile": False}
+            )
+            r = scraper.get(url, timeout=15)
+            logger.info(f"car [{name}] status={r.status_code}")
+            if r.status_code != 200:
+                logger.warning(f"car [{name}] non-200: {r.status_code}")
+                return (name, None)
+            html = r.text
+            soup = BeautifulSoup(html, "html.parser")
+            for script in soup.find_all("script", type="application/ld+json"):
+                try:
+                    data = json.loads(script.string)
+                    if isinstance(data, dict) and data.get("@type") == "Product":
+                        offers = data.get("offers", {})
+                        price = offers.get("price") or offers.get("lowPrice")
+                        if price:
+                            return (name, int(float(str(price).replace(",", ""))))
+                except Exception:
+                    pass
+            m = re.search(r'([\d,]{7,})\s*تومان', html)
+            if m:
+                return (name, int(m.group(1).replace(",", "")))
+            logger.warning(f"car [{name}] no price found, html_len={len(html)}")
+            return (name, None)
+        except Exception as e:
+            logger.error(f"car [{name}] error: {type(e).__name__}: {e}")
+            return (name, None)
+
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [loop.run_in_executor(executor, scrape_one, n, u) for n, u in CAR_PRICE_LIST]
+        results = await asyncio.gather(*futures)
 
     prev    = db.get_previous_car_prices(hours_ago=20)
     current = {}

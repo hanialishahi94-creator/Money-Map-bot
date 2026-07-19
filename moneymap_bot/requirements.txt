@@ -1,5 +1,7 @@
-Flask
-python-telegram-bot[job-queue]==21.6
+flask
+gunicorn
+python-telegram-bot>=20.0
+telethon
 aiohttp
 beautifulsoup4
-matplotlib
+cloudscraper
