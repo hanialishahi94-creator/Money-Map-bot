@@ -2267,7 +2267,7 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
     app.add_handler(CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"))
     app.add_handler(CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"))
-app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
+    app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
     app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
     app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
     app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"))
