@@ -376,7 +376,6 @@ async def get_myfxbook_session() -> str | None:
 
 async def fetch_market_sentiment() -> str:
     import aiohttp
-from bs4 import BeautifulSoup
     session = await get_myfxbook_session()
     if not session:
         return "❌ خطا در اتصال به Myfxbook — بررسی کن ایمیل/پسورد درسته."
@@ -521,14 +520,14 @@ async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 تحلیل بازار", callback_data="analysis_menu")],
-        [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
-        [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
-        [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
-        [InlineKeyboardButton("🚗 قیمت خودرو", callback_data="car_prices")],
-        [InlineKeyboardButton("📈 سنتیمنت بازار", callback_data="sentiment_menu")],
-        [InlineKeyboardButton("🔔 هشدار قیمت", callback_data="alert_menu")],
-        [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
+      [InlineKeyboardButton("📊 تحلیل بازار", callback_data="analysis_menu"),
+         InlineKeyboardButton("📈 سنتیمنت بازار", callback_data="sentiment_menu")],
+        [InlineKeyboardButton("🧮 محاسبه طلا ۱۸ عیار", callback_data="gold_calc"),
+         InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
+        [InlineKeyboardButton("🚗 قیمت خودرو", callback_data="car_prices"),
+         InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
+        [InlineKeyboardButton("🔔 هشدار قیمت", callback_data="alert_menu"),
+         InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
         [InlineKeyboardButton("📞 پشتیبانی", callback_data="support_menu")],
     ])
     user_id = update.effective_user.id
@@ -642,7 +641,6 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== گرفتن قیمت لحظه‌ای از tgju =====
 async def fetch_tgju_price(symbol: str) -> float | None:
     import aiohttp
-from bs4 import BeautifulSoup
     url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
     try:
         async with aiohttp.ClientSession() as session:
@@ -822,7 +820,6 @@ TARGET_CURRENCIES = set(CURRENCY_FA.keys())
 
 async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
     import aiohttp
-from bs4 import BeautifulSoup
     url = f"https://nfs.faireconomy.media/ff_calendar_{week}.json"
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -1058,7 +1055,6 @@ async def fetch_bubble_data(fund_type: str) -> list | None:
     نقره: از API داخلی فاندبیس (چون صفحه HTML مجزا ندارد)
     """
     import aiohttp
-from bs4 import BeautifulSoup
     from html.parser import HTMLParser
 
     if fund_type == "gold":
@@ -1070,7 +1066,6 @@ from bs4 import BeautifulSoup
 async def _fetch_gold_bubble() -> list | None:
     """حباب طلا از صفحه HTML فاندبیس"""
     import aiohttp
-from bs4 import BeautifulSoup
     from html.parser import HTMLParser
 
     class TableParser(HTMLParser):
@@ -1158,7 +1153,6 @@ async def _fetch_silver_bubble() -> list | None:
     index 1 = نام فارسی، index 15 = حباب کل
     """
     import aiohttp
-from bs4 import BeautifulSoup
     import time
 
     url = f"https://tradersarena.ir/data/industries-stocks-csv/silver-funds?_={int(time.time()*1000)}"
@@ -1452,7 +1446,6 @@ async def fetch_usdt_price() -> float | None:
         return price_rial / 10  # تبدیل ریال به تومان
 
     import aiohttp
-from bs4 import BeautifulSoup
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -2225,6 +2218,7 @@ def main():
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
                 CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"),
                 CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"),
+                CallbackQueryHandler(support_menu, pattern="^support_menu$"),
                 CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
                 CallbackQueryHandler(alert_new, pattern="^alert_new$"),
                 CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"),
@@ -2273,6 +2267,7 @@ def main():
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
     app.add_handler(CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"))
     app.add_handler(CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"))
+app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
     app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
     app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
     app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"))
