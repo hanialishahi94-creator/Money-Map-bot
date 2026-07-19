@@ -422,6 +422,9 @@ async def fetch_all_car_prices():
     import json
     from concurrent.futures import ThreadPoolExecutor
 
+    def to_arabic(s):
+        return s.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789'))
+
     def scrape_one(name, url):
         try:
             import cloudscraper
@@ -429,12 +432,14 @@ async def fetch_all_car_prices():
                 browser={"browser": "chrome", "platform": "windows", "mobile": False}
             )
             r = scraper.get(url, timeout=15)
-            logger.info(f"car [{name}] status={r.status_code}")
             if r.status_code != 200:
                 logger.warning(f"car [{name}] non-200: {r.status_code}")
                 return (name, None)
             html = r.text
+            html_ar = to_arabic(html)
             soup = BeautifulSoup(html, "html.parser")
+
+            # روش ۱: JSON-LD Product schema
             for script in soup.find_all("script", type="application/ld+json"):
                 try:
                     data = json.loads(script.string)
@@ -445,10 +450,55 @@ async def fetch_all_car_prices():
                             return (name, int(float(str(price).replace(",", ""))))
                 except Exception:
                     pass
-            m = re.search(r'([\d,]{7,})\s*تومان', html)
+
+            # روش ۲: __NEXT_DATA__ (Next.js)
+            next_script = soup.find("script", id="__NEXT_DATA__")
+            if next_script and next_script.string:
+                try:
+                    nd = json.loads(next_script.string)
+                    nd_text = json.dumps(nd, ensure_ascii=False)
+                    for m in re.finditer(r'"(?:price|Price|قیمت)"\s*:\s*"?([\d]{8,12})"?', nd_text):
+                        n = int(m.group(1))
+                        if 50_000_000 <= n <= 10_000_000_000:
+                            return (name, n)
+                except Exception:
+                    pass
+
+            # روش ۳: meta tag قیمت
+            for meta in soup.find_all("meta"):
+                prop = (meta.get("property") or meta.get("name") or "").lower()
+                if "price" in prop:
+                    content = to_arabic(meta.get("content", "")).replace(",", "")
+                    if content.isdigit():
+                        n = int(content)
+                        if 50_000_000 <= n <= 10_000_000_000:
+                            return (name, n)
+
+            # روش ۴: اعداد عربی + تومان
+            m = re.search(r'([\d,]{7,})\s*تومان', html_ar)
             if m:
                 return (name, int(m.group(1).replace(",", "")))
-            logger.warning(f"car [{name}] no price found, html_len={len(html)}")
+
+            # روش ۵: اعداد فارسی + تومان
+            m = re.search(r'([۰-۹,،]{7,})\s*(?:تومان|ریال)', html)
+            if m:
+                num = to_arabic(m.group(1)).replace(",", "").replace("،", "")
+                if num.isdigit() and len(num) >= 8:
+                    return (name, int(num))
+
+            # روش ۶: هر عدد بزرگ در اسکریپت‌ها
+            for script in soup.find_all("script"):
+                t = script.string or ""
+                if not t:
+                    continue
+                for m in re.finditer(r'"(?:price|Price|قیمت|amount)"\s*:\s*([\d]{8,12})', t):
+                    n = int(m.group(1))
+                    if 50_000_000 <= n <= 10_000_000_000:
+                        return (name, n)
+
+            # debug: لاگ ۳۰۰ کاراکتر اول متن صفحه
+            snippet = soup.get_text()[:300].replace("\n", " ")
+            logger.warning(f"car [{name}] no price | snippet: {snippet}")
             return (name, None)
         except Exception as e:
             logger.error(f"car [{name}] error: {type(e).__name__}: {e}")
