@@ -4,6 +4,8 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 from telegram.error import TelegramError
 import logging
+import asyncio
+from bs4 import BeautifulSoup
 import db
 
 # ===== تنظیمات =====
@@ -19,6 +21,25 @@ VIP_CARD_NUMBER = "6219-8610-1704-6631"
 VIP_CARD_OWNER = "هانیه علیشاهی"
 VIP_DAYS = 30  # مقدار پیش‌فرض — مقدار واقعی از طریق db.get_vip_days() و پنل ادمین قابل تغییر است
 VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
+
+
+CAR_PRICE_LIST = [
+    ("کوییک",       "https://www.hamrah-mechanic.com/carprice/saipa/quick/"),
+    ("شاهین",       "https://www.hamrah-mechanic.com/carprice/saipa/shahin/"),
+    ("تیبا",        "https://www.hamrah-mechanic.com/carprice/saipa/tiba/"),
+    ("ساینا",       "https://www.hamrah-mechanic.com/carprice/saipa/saina/"),
+    ("سهند",        "https://www.hamrah-mechanic.com/carprice/saipa/sahand/"),
+    ("دنا",         "https://www.hamrah-mechanic.com/carprice/irankhodro/dena/"),
+    ("دنا پلاس",    "https://www.hamrah-mechanic.com/carprice/irankhodro/denaplus/"),
+    ("تارا",        "https://www.hamrah-mechanic.com/carprice/irankhodro/tara/"),
+    ("پژو ۲۰۷",    "https://www.hamrah-mechanic.com/carprice/irankhodro/peugeot207/"),
+    ("رانا پلاس",   "https://www.hamrah-mechanic.com/carprice/irankhodro/runna/"),
+    ("ری‌را",       "https://www.hamrah-mechanic.com/carprice/irankhodro/reera/"),
+    ("هاوال H6",    "https://www.hamrah-mechanic.com/carprice/haval/h6/"),
+    ("جک J4",       "https://www.hamrah-mechanic.com/carprice/jac/j4kermanmotor/"),
+    ("چانگان CS35", "https://www.hamrah-mechanic.com/carprice/changan/cs35%20plus/"),
+    ("MVM X22",     "https://www.hamrah-mechanic.com/carprice/mvm/mvmx22/"),
+]
 
 
 def _vip_price_usdt() -> float:
@@ -336,6 +357,7 @@ async def get_myfxbook_session() -> str | None:
     if _myfxbook_session["token"]:
         return _myfxbook_session["token"]
     import aiohttp
+from bs4 import BeautifulSoup
     from urllib.parse import urlencode
     params = urlencode({"email": MYFXBOOK_EMAIL, "password": MYFXBOOK_PASSWORD})
     url = f"https://www.myfxbook.com/api/login.json?{params}"
@@ -354,6 +376,7 @@ async def get_myfxbook_session() -> str | None:
 
 async def fetch_market_sentiment() -> str:
     import aiohttp
+from bs4 import BeautifulSoup
     session = await get_myfxbook_session()
     if not session:
         return "❌ خطا در اتصال به Myfxbook — بررسی کن ایمیل/پسورد درسته."
@@ -396,6 +419,80 @@ async def fetch_market_sentiment() -> str:
         return "❌ خطا در دریافت سنتیمنت"
 
 
+async def fetch_one_car_price(session, name, url):
+    try:
+        import json
+        async with session.get(url) as r:
+            html = await r.text()
+        soup = BeautifulSoup(html, "html.parser")
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, dict) and data.get("@type") == "Product":
+                    offers = data.get("offers", {})
+                    price = offers.get("price") or offers.get("lowPrice")
+                    if price:
+                        return (name, int(float(str(price).replace(",", ""))))
+            except Exception:
+                pass
+        m = re.search(r'([\d,]{7,})\s*تومان', html)
+        if m:
+            return (name, int(m.group(1).replace(",", "")))
+        return (name, None)
+    except Exception:
+        return (name, None)
+
+
+async def fetch_all_car_prices():
+    import aiohttp
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        all_tasks = [fetch_one_car_price(session, n, u) for n, u in CAR_PRICE_LIST]
+        results   = await asyncio.gather(*all_tasks)
+
+    prev    = db.get_previous_car_prices(hours_ago=20)
+    current = {}
+    lines   = []
+
+    for name, price in results:
+        if price is None:
+            lines.append(f"• {name}: خطا")
+            continue
+        current[name] = price
+        p_old = prev.get(name)
+        if p_old and p_old != price:
+            diff = price - p_old
+            pct  = diff / p_old * 100
+            sign = "↑" if diff > 0 else "↓"
+            lines.append(f"• {name}: {price:,} ت {sign}{abs(diff):,} ({pct:+.1f}%)")
+        else:
+            lines.append(f"• {name}: {price:,} تومان")
+
+    if current:
+        db.save_car_prices(current)
+
+    s, i, c = lines[:5], lines[5:10], lines[10:]
+    return "\n".join([
+        "🚗 *قیمت صفر پرفروش‌ها*",
+        "_منبع: همراه مکانیک_\n",
+        "🔵 *سایپا*", *s, "",
+        "🟡 *ایران‌خودرو*", *i, "",
+        "🔴 *چینی‌ها*", *c,
+    ])
+
+
+async def car_prices_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("⌛ در حال دریافت قیمت‌ها...")
+    text = await fetch_all_car_prices()
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="car_prices")],
+        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+    ])
+    await query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    return MAIN_MENU
+
+
 async def sentiment_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("⏳ در حال دریافت داده...")
@@ -428,6 +525,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🧮 محاسبه ارزش واقعی طلای ۱۸ عیار", callback_data="gold_calc")],
         [InlineKeyboardButton("🫧 حباب صندوق‌ها", callback_data="bubble_menu")],
         [InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
+        [InlineKeyboardButton("🚗 قیمت خودرو", callback_data="car_prices")],
         [InlineKeyboardButton("📈 سنتیمنت بازار", callback_data="sentiment_menu")],
         [InlineKeyboardButton("🔔 هشدار قیمت", callback_data="alert_menu")],
         [InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
@@ -544,6 +642,7 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== گرفتن قیمت لحظه‌ای از tgju =====
 async def fetch_tgju_price(symbol: str) -> float | None:
     import aiohttp
+from bs4 import BeautifulSoup
     url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
     try:
         async with aiohttp.ClientSession() as session:
@@ -723,6 +822,7 @@ TARGET_CURRENCIES = set(CURRENCY_FA.keys())
 
 async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
     import aiohttp
+from bs4 import BeautifulSoup
     url = f"https://nfs.faireconomy.media/ff_calendar_{week}.json"
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -958,6 +1058,7 @@ async def fetch_bubble_data(fund_type: str) -> list | None:
     نقره: از API داخلی فاندبیس (چون صفحه HTML مجزا ندارد)
     """
     import aiohttp
+from bs4 import BeautifulSoup
     from html.parser import HTMLParser
 
     if fund_type == "gold":
@@ -969,6 +1070,7 @@ async def fetch_bubble_data(fund_type: str) -> list | None:
 async def _fetch_gold_bubble() -> list | None:
     """حباب طلا از صفحه HTML فاندبیس"""
     import aiohttp
+from bs4 import BeautifulSoup
     from html.parser import HTMLParser
 
     class TableParser(HTMLParser):
@@ -1056,6 +1158,7 @@ async def _fetch_silver_bubble() -> list | None:
     index 1 = نام فارسی، index 15 = حباب کل
     """
     import aiohttp
+from bs4 import BeautifulSoup
     import time
 
     url = f"https://tradersarena.ir/data/industries-stocks-csv/silver-funds?_={int(time.time()*1000)}"
@@ -1349,6 +1452,7 @@ async def fetch_usdt_price() -> float | None:
         return price_rial / 10  # تبدیل ریال به تومان
 
     import aiohttp
+from bs4 import BeautifulSoup
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -2119,6 +2223,7 @@ def main():
                 CallbackQueryHandler(vip_pay_info, pattern="^vip_pay_info$"),
                 CallbackQueryHandler(vip_pay, pattern="^vip_pay$"),
                 CallbackQueryHandler(referral_menu, pattern="^referral_menu$"),
+                CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"),
                 CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"),
                 CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
                 CallbackQueryHandler(alert_new, pattern="^alert_new$"),
@@ -2166,6 +2271,7 @@ def main():
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(vip_approve_callback, pattern="^vip_approve_\d+$"))
     app.add_handler(CallbackQueryHandler(vip_reject_callback, pattern="^vip_reject_\d+$"))
+    app.add_handler(CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"))
     app.add_handler(CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"))
     app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
     app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))

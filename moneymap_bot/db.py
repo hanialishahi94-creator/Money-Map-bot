@@ -471,3 +471,46 @@ def count_active_alerts(user_id: int) -> int:
 
 # هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند
 init_db()
+
+def save_car_prices(prices: dict):
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS car_price_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            car_name   TEXT    NOT NULL,
+            price      INTEGER,
+            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO car_price_history (car_name, price) VALUES (?, ?)",
+        [(name, price) for name, price in prices.items()]
+    )
+    conn.commit()
+    conn.close()
+
+def get_previous_car_prices(hours_ago: int = 20):
+    try:
+        conn = get_connection()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS car_price_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                car_name TEXT NOT NULL,
+                price INTEGER,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        rows = conn.execute("""
+            SELECT car_name, price
+            FROM car_price_history
+            WHERE fetched_at = (
+                SELECT MAX(fetched_at)
+                FROM car_price_history AS h2
+                WHERE h2.car_name = car_price_history.car_name
+                  AND h2.fetched_at <= datetime('now', ?)
+            )
+        """, (f'-{hours_ago} hours',)).fetchall()
+        conn.close()
+        return {row[0]: row[1] for row in rows}
+    except Exception:
+        return {}
