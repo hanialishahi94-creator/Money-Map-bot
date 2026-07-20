@@ -1,4 +1,3 @@
-
 """
 ai_analyst.py — تولید خودکار تحلیل روزانه با Google Gemini (رایگان)
 """
@@ -7,18 +6,40 @@ import re
 import asyncio
 import datetime
 import logging
- 
+
 import pytz
- 
+
 logger = logging.getLogger(__name__)
 TEHRAN_TZ = pytz.timezone("Asia/Tehran")
- 
- 
+
+
 def _clean_search_text(text: str) -> str:
     """حذف کاراکترهای غیرفارسی و غیرانگلیسی از متن سرچ."""
-    # فقط ASCII پایه + فارسی/عربی + نیم‌فاصله
-    return re.sub(r'[^-؀-ۿ‌‍]', '', text)
- 
+    # فقط ASCII پایه (0x00-0x7F) + فارسی/عربی (U+0600-U+06FF) + نیم‌فاصله
+    cleaned = re.sub(r'[^\x00-\x7F\u0600-\u06FF\u200c\u200d]', '', text)
+    return cleaned
+
+
+def _clean_ai_output(text: str) -> str:
+    """حذف کلمات کاملاً غیرفارسی و غیرانگلیسی از خروجی AI."""
+    # کلماتی که فقط از حروف لاتین تشکیل شده و بیشتر از ۵ کاراکترند رو چک کن
+    # اصطلاحات مالی معمول (ETF, DXY, GDP, NFP, CPI, ATH, BTC, ...) رو نگه‌دار
+    allowed_terms = {
+        'etf', 'dxy', 'gdp', 'nfp', 'cpi', 'fomc', 'fed', 'btc', 'xau', 'ath',
+        'rsi', 'ema', 'sma', 'macd', 'usd', 'usdt', 'ai', 'on', 'chain',
+        'put', 'call', 'open', 'interest', 'funding', 'rate', 'whale', 'spot',
+        'long', 'short', 'bull', 'bear', 'halving', 'etf', 'sec', 'us', 'uk',
+    }
+    def replace_word(m):
+        word = m.group(0)
+        if word.lower() in allowed_terms or len(word) <= 4:
+            return word
+        # اگه کلمه لاتین بلند بود و توی لیست مجاز نبود، حذفش کن
+        return ''
+    # فقط کلمات خالص لاتین که بین فاصله‌ها هستن رو چک کن
+    return re.sub(r'(?<![\u0600-\u06FF])\b[a-zA-Z]{5,}\b(?![\u0600-\u06FF])', replace_word, text)
+
+
 ASSETS = {
     "gold": {
         "fa_name": "اونس جهانی طلا",
@@ -39,14 +60,14 @@ ASSETS = {
         "search_query": "Bitcoin BTC price analysis forecast traders position today",
     },
 }
- 
- 
- 
- 
+
+
+
+
 async def _fetch_market_data(ticker: str) -> dict:
     """دریافت داده‌های قیمتی از yfinance (non-blocking)."""
     loop = asyncio.get_event_loop()
- 
+
     def _fetch():
         try:
             import yfinance as yf
@@ -74,14 +95,14 @@ async def _fetch_market_data(ticker: str) -> dict:
         except Exception as e:
             logger.warning(f"yfinance fetch failed for {ticker}: {e}")
             return {}
- 
+
     return await loop.run_in_executor(None, _fetch)
- 
- 
+
+
 async def _search_analyst_opinions(query: str) -> str:
     """جستجوی آنلاین نظرات تحلیلگران با DuckDuckGo (رایگان)."""
     loop = asyncio.get_event_loop()
- 
+
     def _search():
         try:
             from duckduckgo_search import DDGS
@@ -95,14 +116,14 @@ async def _search_analyst_opinions(query: str) -> str:
         except Exception as e:
             logger.warning(f"DuckDuckGo search failed: {e}")
             return "جستجوی آنلاین در دسترس نیست."
- 
+
     return await loop.run_in_executor(None, _search)
- 
- 
+
+
 async def _search_economic_calendar(today: str) -> str:
     """جستجوی داده‌های مهم اقتصادی امروز."""
     loop = asyncio.get_event_loop()
- 
+
     def _search():
         try:
             from duckduckgo_search import DDGS
@@ -119,17 +140,17 @@ async def _search_economic_calendar(today: str) -> str:
         except Exception as e:
             logger.warning(f"Economic calendar search failed: {e}")
             return "جستجوی تقویم اقتصادی ناموفق."
- 
+
     return await loop.run_in_executor(None, _search)
- 
- 
+
+
 async def _call_groq(prompt: str) -> str:
     """ارسال پرامپت به Groq API (رایگان، سریع، مدل Llama 3.1)."""
     from openai import AsyncOpenAI
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError("متغیر محیطی GROQ_API_KEY تنظیم نشده. از console.groq.com کلید رایگان بگیر.")
- 
+
     client = AsyncOpenAI(
         api_key=api_key,
         base_url="https://api.groq.com/openai/v1",
@@ -140,20 +161,21 @@ async def _call_groq(prompt: str) -> str:
         temperature=0.7,
         max_tokens=1600,
     )
-    return response.choices[0].message.content
- 
- 
+    result = response.choices[0].message.content
+    return _clean_ai_output(result)
+
+
 async def generate_analysis(asset_key: str) -> str:
     """تولید تحلیل روزانه برای یک دارایی."""
     asset = ASSETS[asset_key]
     today = datetime.datetime.now(TEHRAN_TZ).strftime("%Y/%m/%d")
- 
+
     market_data, analyst_info, econ_calendar = await asyncio.gather(
         _fetch_market_data(asset["ticker"]),
         _search_analyst_opinions(asset["search_query"]),
         _search_economic_calendar(today),
     )
- 
+
     if market_data:
         recent = market_data.get("recent", [])
         recent_str = " | ".join([f"{r['d']}: {r['c']}" for r in recent]) if recent else "N/A"
@@ -166,126 +188,126 @@ async def generate_analysis(asset_key: str) -> str:
         )
     else:
         md_text = "داده‌های قیمتی در دسترس نیستند."
- 
+
     if asset_key == "bitcoin":
-        prompt = f"""تو یه تحلیلگر بازار کریپتو هستی. لحنت باید دقیقاً اینطور باشه: نه کتابی و آکادمیک، نه خیلی عامیانه. مثل یه متخصص که مستقیم با مخاطب حرف می‌زنه. از عباراتی مثل «به نظر میرسه»، «انتظار داریم»، «حواستون باشه»، «این سطح مهمه» استفاده کن. جملات کوتاه و مستقیم. مخاطب رو به چیزهای مهم هشدار بده.
- 
+        prompt = f"""تو یه تحلیلگر بازار کریپتو هستی. فقط و فقط به فارسی بنویس — هیچ کلمه ترکی، اندونزیایی یا غیرانگلیسی استفاده نکن. لحنت باید دقیقاً اینطور باشه: نه کتابی و آکادمیک، نه خیلی عامیانه. مثل یه متخصص که مستقیم با مخاطب حرف می‌زنه. از عباراتی مثل «به نظر میرسه»، «انتظار داریم»، «حواستون باشه»، «این سطح مهمه» استفاده کن. جملات کوتاه و مستقیم. مخاطب رو به چیزهای مهم هشدار بده.
+
 📅 تاریخ: {today}
 📈 داده‌های بازار BTC: {md_text}
- 
+
 🌐 دیدگاه تحلیلگران از وب:
 {analyst_info}
- 
+
 📆 رویدادهای اقتصادی امروز:
 {econ_calendar}
- 
+
 ---
 تحلیل بیتکوین رو با این ساختار بنویس:
- 
+
 ۱. 📊 وضعیت قیمت
    قیمت و تغییر امروز رو بگو — بازار الان کجا وایستاده
- 
+
 ۲. 📈 تکنیکال
    سطوح حمایت و مقاومت کلیدی، روند فعلی
- 
+
 ۳. 🌍 فاندامنتال و سنتیمنت
    مهم‌ترین اخبار، ریسک‌های ژئوپلیتیک، سیاست پولی فدرال رزرو
    اگه امروز داده اقتصادی مهمی مثل CPI، NFP، FOMC یا GDP داریم، حتماً بهش اشاره کن و بگو چه تأثیری می‌تونه داشته باشه
- 
+
 ۴. 🔗 آنچین (On-Chain)
    فقط اگه داده معناداری هست بگو — در غیر این صورت خیلی کوتاه رد کن
- 
+
 ۵. 📊 بازار مشتقات
    فقط اگه funding rate، open interest یا put/call ratio حرفی برای گفتن داره — وگرنه یه جمله کافیه
- 
+
 ۶. 🏦 ETF بیتکوین
    فقط اگه اتفاق مهمی افتاده بگو — وگرنه خیلی کوتاه رد کن
- 
+
 ۷. 👥 موضع بازار
    الان بیشتر لانگ هستن یا شورت؟
- 
+
 ۸. 🎯 بایاس امروز
    صریح بگو: صعودی / نزولی / خنثی + دلیل
- 
+
 حدود ۳۵۰ کلمه. بخش‌هایی که داده مهمی ندارن رو کوتاه کن."""
- 
+
     elif asset_key == "dollar":
-        prompt = f"""تو یه تحلیلگر بازار فارکس هستی. لحنت باید دقیقاً اینطور باشه: نه کتابی و آکادمیک، نه خیلی عامیانه. مثل یه متخصص که مستقیم با مخاطب حرف می‌زنه. از عباراتی مثل «به نظر میرسه»، «انتظار داریم»، «حواستون باشه»، «این سطح مهمه» استفاده کن. جملات کوتاه و مستقیم.
- 
+        prompt = f"""تو یه تحلیلگر بازار فارکس هستی. فقط و فقط به فارسی بنویس — هیچ کلمه ترکی، اندونزیایی یا غیرانگلیسی استفاده نکن. لحنت باید دقیقاً اینطور باشه: نه کتابی و آکادمیک، نه خیلی عامیانه. مثل یه متخصص که مستقیم با مخاطب حرف می‌زنه. از عباراتی مثل «به نظر میرسه»، «انتظار داریم»، «حواستون باشه»، «این سطح مهمه» استفاده کن. جملات کوتاه و مستقیم.
+
 📅 تاریخ: {today}
 📈 داده‌های شاخص دلار DXY: {md_text}
- 
+
 🌐 دیدگاه تحلیلگران از وب:
 {analyst_info}
- 
+
 📆 رویدادهای اقتصادی امروز:
 {econ_calendar}
- 
+
 ---
 تحلیل شاخص دلار رو با این ساختار بنویس:
- 
+
 ۱. 📊 وضعیت DXY
    قیمت و تغییر امروز — دلار الان کجا وایستاده
- 
+
 ۲. 📈 تکنیکال
    سطوح حمایت و مقاومت کلیدی، روند فعلی
- 
+
 ۳. 🌍 سیاست پولی و اقتصاد کلان
    آخرین موضع فدرال رزرو، وضعیت تورم
    اگه امروز داده مهمی مثل CPI، NFP، FOMC یا GDP داریم، حتماً بهش اشاره کن و بگو چه تأثیری می‌تونه داشته باشه
- 
+
 ۴. 🎯 بایاس امروز
    صریح بگو: صعودی / نزولی / خنثی + دلیل
- 
+
 حدود ۲۰۰ کلمه. فقط بخش‌هایی که داده واقعی داری رو بنویس."""
- 
+
     else:  # gold
-        prompt = f"""تو یه تحلیلگر بازار طلا هستی. لحنت باید دقیقاً اینطور باشه: نه کتابی و آکادمیک، نه خیلی عامیانه. مثل یه متخصص که مستقیم با مخاطب حرف می‌زنه. از عباراتی مثل «به نظر میرسه»، «انتظار داریم»، «حواستون باشه»، «این سطح مهمه» استفاده کن. جملات کوتاه و مستقیم.
- 
+        prompt = f"""تو یه تحلیلگر بازار طلا هستی. فقط و فقط به فارسی بنویس — هیچ کلمه ترکی، اندونزیایی یا غیرانگلیسی استفاده نکن. لحنت باید دقیقاً اینطور باشه: نه کتابی و آکادمیک، نه خیلی عامیانه. مثل یه متخصص که مستقیم با مخاطب حرف می‌زنه. از عباراتی مثل «به نظر میرسه»، «انتظار داریم»، «حواستون باشه»، «این سطح مهمه» استفاده کن. جملات کوتاه و مستقیم.
+
 📅 تاریخ: {today}
 📈 داده‌های اونس جهانی XAU/USD: {md_text}
- 
+
 🌐 دیدگاه تحلیلگران از وب:
 {analyst_info}
- 
+
 📆 رویدادهای اقتصادی امروز:
 {econ_calendar}
- 
+
 ---
 تحلیل اونس جهانی طلا رو با این ساختار بنویس:
- 
+
 ۱. 📊 وضعیت قیمت
    قیمت و تغییر امروز — طلا الان کجا وایستاده
- 
+
 ۲. 📈 تکنیکال
    سطوح حمایت و مقاومت کلیدی، روند فعلی
- 
+
 ۳. 🌍 فاندامنتال و سنتیمنت
    تنش‌های ژئوپلیتیک، سیاست پولی، تقاضای بانک‌های مرکزی
    اگه امروز داده مهمی مثل CPI، NFP، FOMC یا GDP داریم، حتماً بهش اشاره کن و بگو چه تأثیری می‌تونه داشته باشه
- 
+
 ۴. 👥 موضع تحلیلگران
    دیدگاه غالب: لانگ یا شورت؟
- 
+
 ۵. 🎯 بایاس امروز
    صریح بگو: صعودی / نزولی / خنثی + دلیل
- 
+
 حدود ۲۵۰ کلمه."""
- 
+
     return await _call_groq(prompt)
- 
- 
+
+
 async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) -> str:
     """ویرایش تحلیل موجود بر اساس دستور ادمین."""
     asset = ASSETS[asset_key]
- 
+
     prompt = f"""تحلیل زیر برای {asset['fa_name']} نوشته شده:
- 
+
 {original_text}
- 
+
 ---
 دستور ویرایش از ادمین: {edit_prompt}
- 
+
 تحلیل رو دقیقاً طبق دستور ویرایش کن. ساختار ۵ بخشی و فرمت فارسی رو حفظ کن."""
- 
+
     return await _call_groq(prompt)
