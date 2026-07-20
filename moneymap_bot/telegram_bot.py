@@ -2347,7 +2347,7 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
             continue
 
         caption = (
-            f"{asset['emoji']} تحلیل AI — {asset['fa_name']}\n"
+            f"{asset['emoji']} {asset['fa_name']}\n"
             f"📅 {today}\n\n"
             f"{text}"
         )
