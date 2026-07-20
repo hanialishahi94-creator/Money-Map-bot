@@ -2424,14 +2424,12 @@ async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت پرامپت ویرایش از ادمین (ریپلای به پیام درخواست ویرایش)."""
     msg = update.message
-    if not msg or msg.chat_id != SUPPORT_GROUP_ID:
-        return
-    if not msg.reply_to_message:
+    if not msg or not msg.reply_to_message:
         return
 
     replied_id = msg.reply_to_message.message_id
 
-    # از SQLite بخون (بعد از ری‌استارت هم کار می‌کنه)
+    # از SQLite بخون — اگه داده نبود یعنی این ریپلای مربوط به ویرایش AI نیست
     edit_data = db.get_ai_edit_waiting(replied_id)
     if not edit_data:
         return
@@ -2456,10 +2454,7 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
         # ai_pending رو هم آپدیت کن
         pending = context.bot_data.setdefault("ai_pending", {})
         pending_key = f"{asset_key}:{original_msg_id}"
-        if pending_key in pending:
-            pending[pending_key]["text"] = new_text
-        else:
-            pending[pending_key] = {"text": new_text, "date": today}
+        pending[pending_key] = {"text": new_text, "date": today}
 
         asset = ai_analyst.ASSETS[asset_key]
         new_caption = (
@@ -2477,7 +2472,7 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
 
         try:
             await context.bot.edit_message_text(
-                chat_id=SUPPORT_GROUP_ID,
+                chat_id=msg.chat_id,
                 message_id=original_msg_id,
                 text=new_caption,
                 reply_markup=keyboard,
@@ -2592,10 +2587,11 @@ def main():
     app.add_handler(CommandHandler("ai", cmd_trigger_ai_analysis))
     app.add_handler(CallbackQueryHandler(ai_approve_callback, pattern=r"^ai_approve:"))
     app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
+    # این handler باید با group=-1 ثبت بشه تا قبل از ConversationHandler اجرا بشه
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & filters.REPLY,
         ai_edit_prompt_handler,
-    ))
+    ), group=-1)
 
     if app.job_queue is not None:
         app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
