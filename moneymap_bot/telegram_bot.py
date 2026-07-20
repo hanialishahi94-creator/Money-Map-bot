@@ -1561,6 +1561,18 @@ async def vip_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MAIN_MENU
 
+    # بررسی ظرفیت کانال VIP
+    if not db.is_vip_channel_open():
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+        ])
+        await query.message.reply_text(
+            "🔒 متأسفانه در حال حاضر ظرفیت کانال VIP تکمیل شده است.\n\n"
+            "عضوگیری جدید موقتاً متوقف شده. بعداً دوباره تلاش کن! 🙏",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+
     # کاربر هنوز VIP فعال نداره — دو راه پیش روشه: پرداخت یا دعوت دوستان
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 پرداخت هزینه اشتراک", callback_data="vip_pay_info")],
