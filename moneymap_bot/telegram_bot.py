@@ -2283,6 +2283,14 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
 
 # ===== تحلیل روزانه AI =====
 
+async def cmd_trigger_ai_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /ai — تریگر دستی تحلیل همین الان (فقط در گروه پشتیبانی)."""
+    if update.effective_chat.id != SUPPORT_GROUP_ID:
+        return
+    await update.message.reply_text("🤖 در حال تولید تحلیل‌های AI...")
+    await daily_ai_analysis_job(context)
+
+
 async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
     """جاب ساعت ۹ صبح — تولید و ارسال تحلیل AI به گروه ادمین."""
     import ai_analyst
@@ -2567,6 +2575,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.PHOTO, handle_non_photo_while_waiting_receipt))
     # AI Analysis handlers
+    app.add_handler(CommandHandler("ai", cmd_trigger_ai_analysis))
     app.add_handler(CallbackQueryHandler(ai_approve_callback, pattern=r"^ai_approve:"))
     app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
     app.add_handler(MessageHandler(
