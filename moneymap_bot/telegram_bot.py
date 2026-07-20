@@ -2385,7 +2385,7 @@ async def ai_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """درخواست ویرایش تحلیل AI."""
+    """درخواست ویرایش تحلیل AI — ورود به حالت ویرایش."""
     query = update.callback_query
     await query.answer()
 
@@ -2397,64 +2397,38 @@ async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending = context.bot_data.get("ai_pending", {})
     if key in pending:
         original_text = pending[key]["text"]
-        today = pending[key]["date"]
     else:
         row = db.get_analysis(asset_key)
         if not row or not row.get("text"):
             await query.answer("⚠️ تحلیل یافت نشد!", show_alert=True)
             return
         original_text = row["text"]
-        today = row.get("analysis_date", "")
 
-    prompt_msg = await query.message.reply_text(
-        "✏️ پرامپت ویرایشت رو ریپلای کن روی همین پیام 👇\n\n"
-        "مثال: «کوتاهترش کن» / «تکنیکالی‌تر باشه» / «لحن رسمی‌تر باشه»"
-    )
-
-    edit_record = {
+    # ذخیره حالت ویرایش برای این گروه (بر اساس chat_id)
+    context.bot_data.setdefault("ai_edit_mode", {})[query.message.chat_id] = {
         "asset_key": asset_key,
         "original_text": original_text,
         "analysis_msg_id": msg_id,
     }
-    # ذخیره در bot_data (اولویت اول — همیشه کار می‌کنه)
-    context.bot_data.setdefault("ai_edit_waiting", {})[prompt_msg.message_id] = edit_record
-    # ذخیره در SQLite هم (برای بعد از ری‌استارت)
-    try:
-        db.set_ai_edit_waiting(
-            prompt_msg_id=prompt_msg.message_id,
-            asset_key=asset_key,
-            original_text=original_text,
-            analysis_msg_id=msg_id,
-        )
-    except Exception:
-        pass  # اگه db.py قدیمی باشه مشکلی نیست، bot_data کافیه
+
+    await query.message.reply_text(
+        "✏️ دستور ویرایشت رو بنویس و ارسال کن 👇\n\n"
+        "مثال: «کوتاهترش کن» / «تکنیکالی‌تر باشه» / «لحن رسمی‌تر باشه»"
+    )
 
 
 async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت پرامپت ویرایش از ادمین (ریپلای به پیام درخواست ویرایش)."""
+    """دریافت دستور ویرایش از ادمین — هر پیام متنی در گروه بعد از کلیک ✏️."""
     msg = update.message
-    if not msg or not msg.reply_to_message:
+    if not msg:
         return
 
-    replied_id = msg.reply_to_message.message_id
+    # چک کن آیا این گروه در حالت ویرایش است
+    edit_modes = context.bot_data.get("ai_edit_mode", {})
+    if msg.chat_id not in edit_modes:
+        return
 
-    # اول bot_data چک کن (سریع‌تر و مستقل از db)
-    waiting = context.bot_data.get("ai_edit_waiting", {})
-    if replied_id in waiting:
-        edit_data = waiting.pop(replied_id)
-    else:
-        # fallback: از SQLite بخون (برای بعد از ری‌استارت)
-        try:
-            edit_data = db.get_ai_edit_waiting(replied_id)
-        except Exception:
-            edit_data = None
-        if not edit_data:
-            return
-        try:
-            db.clear_ai_edit_waiting(replied_id)
-        except Exception:
-            pass
-
+    edit_data = edit_modes.pop(msg.chat_id)
     asset_key = edit_data["asset_key"]
     original_text = edit_data["original_text"]
     original_msg_id = edit_data["analysis_msg_id"]
@@ -2470,10 +2444,9 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
         import ai_analyst
         new_text = await ai_analyst.edit_analysis(original_text, edit_prompt, asset_key)
 
-        # ai_pending رو هم آپدیت کن
-        pending = context.bot_data.setdefault("ai_pending", {})
+        # ai_pending رو آپدیت کن
         pending_key = f"{asset_key}:{original_msg_id}"
-        pending[pending_key] = {"text": new_text, "date": today}
+        context.bot_data.setdefault("ai_pending", {})[pending_key] = {"text": new_text, "date": today}
 
         asset = ai_analyst.ASSETS[asset_key]
         new_caption = (
@@ -2500,13 +2473,16 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
             await msg.reply_text(new_caption, reply_markup=keyboard)
 
         try:
-            await thinking.delete()
+            await thinking.edit_text("✅ تحلیل ویرایش شد! پیام بالا آپدیت شده.")
         except Exception:
             pass
 
     except Exception as e:
         logger.exception("ai edit error")
-        await thinking.edit_text(f"❌ خطا در ویرایش: {e}")
+        try:
+            await thinking.edit_text(f"❌ خطا در ویرایش: {e}")
+        except Exception:
+            pass
 
 
 def main():
