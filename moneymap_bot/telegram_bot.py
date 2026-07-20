@@ -682,6 +682,27 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
 
+    # ── چارت لحظه‌ای برای همه کاربران ─────────────────────────────────────
+    try:
+        import chart_generator
+        import io as _io
+        result = await chart_generator.generate_chart_bytes_async(asset_key)
+        chart_bytes, sup_mid, res_mid = result if result else (None, None, None)
+        if chart_bytes:
+            fmt_map = {"bitcoin": ",.0f", "gold": ",.1f", "dollar": ",.3f"}
+            fmt = fmt_map.get(asset_key, ",.2f")
+            chart_caption = f"📊 {asset_name}  ·  1H\n"
+            if sup_mid is not None:
+                chart_caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
+            if res_mid is not None:
+                chart_caption += f"🔴 مقاومت: {res_mid:{fmt}}"
+            await query.message.reply_photo(
+                photo=_io.BytesIO(chart_bytes),
+                caption=chart_caption.strip(),
+            )
+    except Exception as _e:
+        logger.warning(f"chart in show_analysis failed for {asset_key}: {_e}")
+
     await query.message.reply_text(
         f"📊 تحلیل {asset_name}\n{analysis_text}",
         reply_markup=keyboard,
