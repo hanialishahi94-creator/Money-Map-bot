@@ -2369,7 +2369,7 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
                 elif asset_key == "gold":
                     fmt = ",.1f"
 
-                chart_caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  1H  ·  ICT Order Block\n"
+                chart_caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  1H\n"
                 if sup_mid is not None:
                     chart_caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
                 if res_mid is not None:
