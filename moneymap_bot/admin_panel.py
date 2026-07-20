@@ -265,6 +265,17 @@ def api_vip_remove(user_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/vip/channel", methods=["GET", "POST"])
+@login_required
+def api_vip_channel():
+    """وضعیت ظرفیت کانال VIP را برمی‌گرداند یا تغییر می‌دهد."""
+    if request.method == "GET":
+        return jsonify({"open": db.is_vip_channel_open()})
+    data = request.get_json(silent=True) or {}
+    db.set_vip_channel_open(bool(data.get("open", True)))
+    return jsonify({"ok": True, "open": db.is_vip_channel_open()})
+
+
 # ===================================================================
 # تحلیل هفتگی (متن + تصویر)
 # ===================================================================

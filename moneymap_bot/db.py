@@ -416,6 +416,17 @@ def get_vip_days(default: int = 30):
         return default
 
 
+def is_vip_channel_open() -> bool:
+    """آیا ظرفیت کانال VIP باز است؟ (پیش‌فرض: باز)"""
+    val = get_setting("vip_channel_open")
+    return val != "0"
+
+
+def set_vip_channel_open(value: bool):
+    """باز یا بسته کردن ظرفیت کانال VIP از پنل ادمین."""
+    set_setting("vip_channel_open", "1" if value else "0")
+
+
 # ---------- هشدار قیمت ----------
 
 def add_price_alert(user_id: int, asset: str, target_price: float, direction: str, message: str) -> int:
