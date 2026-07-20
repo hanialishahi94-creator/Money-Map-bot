@@ -162,10 +162,11 @@ def _draw_candles(ax, df):
 
 # ─── تابع اصلی تولید چارت ────────────────────────────────────────────────────
 
-def generate_chart_bytes(asset_key: str) -> bytes | None:
+def generate_chart_bytes(asset_key: str):
     """
     داده ۱H رو از yfinance می‌گیره، OB حمایت و مقاومت رو حساب می‌کنه،
-    و چارت رو به صورت bytes برمی‌گردونه (PNG).
+    و یه tuple (png_bytes, support_mid, resistance_mid) برمی‌گردونه.
+    در صورت خطا None برمی‌گردونه.
     """
     import yfinance as yf
     import matplotlib
@@ -176,19 +177,19 @@ def generate_chart_bytes(asset_key: str) -> bytes | None:
 
     cfg = ASSET_CONFIG.get(asset_key)
     if not cfg:
-        return None
+        return None, None, None
 
     # ─── دریافت داده ───
     try:
         hist = yf.Ticker(cfg["ticker"]).history(period="30d", interval="1h")
         if hist.empty:
             logger.error(f"No data for {asset_key}")
-            return None
+            return None, None, None
         hist = hist.tail(120).copy()
         hist.reset_index(inplace=True)
     except Exception as e:
         logger.error(f"yfinance error for {asset_key}: {e}")
-        return None
+        return None, None, None
 
     # ─── محاسبه OB ───
     try:
@@ -196,6 +197,10 @@ def generate_chart_bytes(asset_key: str) -> bytes | None:
     except Exception as e:
         logger.error(f"OB detection error: {e}")
         support, resistance = None, None
+
+    # ─── میانه‌ی ناحیه‌ها (برای پاس دادن به AI) ───
+    sup_mid = (support["low"] + support["high"]) / 2 if support else None
+    res_mid = (resistance["low"] + resistance["high"]) / 2 if resistance else None
 
     n      = len(hist)
     cur    = hist["Close"].iloc[-1]
@@ -333,11 +338,14 @@ def generate_chart_bytes(asset_key: str) -> bytes | None:
                 bbox_inches="tight", facecolor=BG, edgecolor="none")
     plt.close(fig)
     buf.seek(0)
-    return buf.read()
+    return buf.read(), sup_mid, res_mid
 
 
-async def generate_chart_bytes_async(asset_key: str) -> bytes | None:
-    """نسخه async از generate_chart_bytes — برای استفاده در telegram_bot."""
+async def generate_chart_bytes_async(asset_key: str):
+    """
+    نسخه async از generate_chart_bytes — برای استفاده در telegram_bot.
+    برمی‌گردونه: (png_bytes, support_mid, resistance_mid) یا (None, None, None)
+    """
     import asyncio
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, generate_chart_bytes, asset_key)

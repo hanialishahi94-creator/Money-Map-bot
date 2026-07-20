@@ -682,24 +682,6 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
 
-    # ── ارسال چارت ICT/LIT ──────────────────────────────────────────────────
-    try:
-        import chart_generator
-        import io as _io
-        chart_bytes = await chart_generator.generate_chart_bytes_async(asset_key)
-        if chart_bytes:
-            caption_chart = (
-                f"📊 چارت {asset_name}  ·  1H  ·  ICT/LIT Order Block\n"
-                f"🟢 ناحیه حمایت  |  🔴 ناحیه مقاومت"
-            )
-            await query.message.reply_photo(
-                photo=_io.BytesIO(chart_bytes),
-                caption=caption_chart,
-            )
-    except Exception as _e:
-        logger.warning(f"chart_generator failed for {asset_key}: {_e}")
-
-    # ── ارسال متن تحلیل ─────────────────────────────────────────────────────
     await query.message.reply_text(
         f"📊 تحلیل {asset_name}\n{analysis_text}",
         reply_markup=keyboard,
@@ -2324,6 +2306,9 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
     if "ai_edit_waiting" not in context.bot_data:
         context.bot_data["ai_edit_waiting"] = {}
 
+    import chart_generator
+    import io as _io
+
     for asset_key, asset in ai_analyst.ASSETS.items():
         try:
             await context.bot.send_message(
@@ -2333,8 +2318,23 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+        # ── ۱. اول چارت رو بگیر تا S/R levels دستمون باشه ──────────────────
+        chart_bytes = None
+        sup_mid = None
+        res_mid = None
         try:
-            text = await ai_analyst.generate_analysis(asset_key)
+            result = await chart_generator.generate_chart_bytes_async(asset_key)
+            chart_bytes, sup_mid, res_mid = result if result else (None, None, None)
+        except Exception as _ce:
+            logger.warning(f"Chart generation failed for {asset_key}: {_ce}")
+
+        # ── ۲. تحلیل AI رو با S/R levels تولید کن ───────────────────────────
+        try:
+            text = await ai_analyst.generate_analysis(
+                asset_key,
+                support_level=sup_mid,
+                resistance_level=res_mid,
+            )
         except Exception as e:
             logger.error(f"AI analysis failed for {asset_key}: {e}")
             try:
@@ -2360,6 +2360,30 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("✏️ ویرایش", callback_data=f"ai_edit:{asset_key}"),
         ]])
 
+        # ── ۳. ارسال چارت با کپشن S/R همخوان با متن تحلیل ─────────────────
+        if chart_bytes:
+            try:
+                fmt = ",.2f"  # فرمت پیش‌فرض
+                if asset_key == "bitcoin":
+                    fmt = ",.0f"
+                elif asset_key == "gold":
+                    fmt = ",.1f"
+
+                chart_caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  1H  ·  ICT Order Block\n"
+                if sup_mid is not None:
+                    chart_caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
+                if res_mid is not None:
+                    chart_caption += f"🔴 مقاومت: {res_mid:{fmt}}"
+
+                await context.bot.send_photo(
+                    chat_id=SUPPORT_GROUP_ID,
+                    photo=_io.BytesIO(chart_bytes),
+                    caption=chart_caption.strip(),
+                )
+            except Exception as _ce:
+                logger.warning(f"Failed to send chart for {asset_key}: {_ce}")
+
+        # ── ۴. ارسال متن تحلیل با دکمه‌های تایید/ویرایش ─────────────────────
         try:
             msg = await context.bot.send_message(
                 chat_id=SUPPORT_GROUP_ID,
