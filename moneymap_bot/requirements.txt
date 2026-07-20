@@ -11,3 +11,7 @@ duckduckgo-search
 pytz
 google-generativeai
 httpx
+matplotlib
+scipy
+numpy
+pandas
