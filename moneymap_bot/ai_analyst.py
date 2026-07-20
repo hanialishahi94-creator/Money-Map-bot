@@ -18,16 +18,19 @@ ASSETS = {
         "ticker": "BTC-USD",
         "search_query": "bitcoin BTC price analysis forecast today",
         "fa_name": "بیتکوین",
+        "emoji": "₿",
     },
     "dollar": {
         "ticker": "DX-Y.NYB",
         "search_query": "DXY dollar index analysis forecast today",
         "fa_name": "شاخص دلار",
+        "emoji": "💵",
     },
     "gold": {
         "ticker": "GC=F",
         "search_query": "gold XAU USD price analysis forecast today",
         "fa_name": "اونس جهانی طلا",
+        "emoji": "🥇",
     },
 }
 
