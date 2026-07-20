@@ -150,7 +150,7 @@ async def generate_analysis(asset_key: str) -> str:
 قالب: پاراگراف‌های کوتاه فارسی روان. حدود ۳۰۰ کلمه. حرفه‌ای و قابل اعتماد."""
 
     response = await client.chat.completions.create(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
         max_tokens=1600,
@@ -173,7 +173,7 @@ async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) ->
 تحلیل رو دقیقاً طبق دستور ویرایش کن. ساختار ۵ بخشی و فرمت فارسی رو حفظ کن."""
 
     response = await client.chat.completions.create(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
         max_tokens=1600,
