@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Money MAP — پنل ادمین</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { font-family: 'Vazirmatn', sans-serif; }
+    body { background: #0d0d14; color: #e2e2e2; margin: 0; }
+    :root {
+      --gold: #d4a843;
+      --gold-dim: #b8922a;
+      --bg: #0d0d14;
+      --bg2: #13131e;
+      --bg3: #1a1a28;
+      --border: rgba(212,168,67,0.18);
+      --muted: #6b7280;
+    }
+    .gold-text { background: linear-gradient(135deg, #d4a843, #f5c842); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .gold-ring { border: 1px solid rgba(212,168,67,0.35) !important; box-shadow: 0 0 20px rgba(212,168,67,0.08); }
+    .card { background: var(--bg2); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.06); }
+    .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.15s; border:none; outline:none; }
+    .btn-gold { background: linear-gradient(135deg, #d4a843, #b8922a); color: #0d0d14; }
+    .btn-gold:hover { filter: brightness(1.1); }
+    .btn-outline { background: rgba(212,168,67,0.1); color: var(--gold); border: 1px solid var(--border); }
+    .btn-outline:hover { background: rgba(212,168,67,0.2); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-success { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    .btn-success:hover { background: rgba(34,197,94,0.25); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .badge { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:9999px; font-size:11px; font-weight:600; }
+    .badge::before { content:''; display:inline-block; width:6px; height:6px; border-radius:50%; }
+    .badge-green { background:rgba(34,197,94,0.15); color:#22c55e; border:1px solid rgba(34,197,94,0.3); }
+    .badge-green::before { background:#22c55e; box-shadow:0 0 4px #22c55e; animation: pulse 2s infinite; }
+    .badge-gold { background:rgba(212,168,67,0.15); color:var(--gold); border:1px solid rgba(212,168,67,0.3); }
+    .badge-gold::before { background:var(--gold); }
+    .badge-red { background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3); }
+    .badge-red::before { background:#ef4444; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .input { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 12px; color: #e2e2e2; font-size: 14px; width: 100%; outline: none; transition: border 0.15s; box-sizing:border-box; }
+    .input:focus { border-color: var(--gold); }
+    textarea.input { resize: vertical; min-height: 100px; }
+    select.input { cursor: pointer; }
+    .sidebar { background: var(--bg2); border-left: 1px solid rgba(255,255,255,0.06); min-height: 100vh; width: 220px; position: fixed; right: 0; top: 0; z-index: 100; padding: 24px 0; display:flex; flex-direction:column; }
+    .nav-item { display:flex; align-items:center; gap:10px; padding:10px 20px; font-size:14px; font-weight:500; cursor:pointer; transition:all 0.15s; color: var(--muted); border-right: 3px solid transparent; }
+    .nav-item:hover { background: rgba(212,168,67,0.07); color: #e2e2e2; }
+    .nav-item.active { background: rgba(212,168,67,0.1); color: var(--gold); border-right-color: var(--gold); }
+    .main-content { margin-right: 220px; padding: 32px; min-height: 100vh; max-width: 1100px; }
+    .stat-card { background: var(--bg2); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.06); }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: right; padding: 10px 12px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.07); white-space: nowrap; }
+    td { padding: 12px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+    tr:hover td { background: rgba(212,168,67,0.02); }
+    .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 10px; }
+    .alert-error { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+    .alert-success { background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid rgba(34,197,94,0.25); }
+    .login-wrap { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .login-box { background: var(--bg2); border-radius: 16px; padding: 40px; width: 360px; border: 1px solid var(--border); box-shadow: 0 0 40px rgba(212,168,67,0.1); }
+    .spinner { width:18px; height:18px; border:2px solid rgba(255,255,255,0.2); border-top-color:#fff; border-radius:50%; animation: spin 0.6s linear infinite; display:inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .section-title { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+    .section-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+    label.lbl { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.6); display:block; margin-bottom:6px; }
+    .tab-btn { padding:7px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--muted); transition:all 0.15s; }
+    .tab-btn.active { background:rgba(212,168,67,0.15); color:var(--gold); }
+    .channel-card { border-radius: 12px; padding: 20px; border: 2px solid; margin-bottom: 20px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+    .channel-card.open { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.05); }
+    .channel-card.closed { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.05); }
+    @media (max-width: 768px) {
+      .sidebar { width: 100%; min-height:auto; position:static; flex-direction:row; overflow-x:auto; border-left:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:0; }
+      .nav-item { padding: 10px 12px; flex-direction:column; gap:2px; font-size:10px; border-right:none; border-bottom: 3px solid transparent; white-space:nowrap; }
+      .nav-item.active { border-bottom-color:var(--gold); border-right:none; }
+      .main-content { margin-right: 0; padding: 14px; }
+      .login-box { width: 90%; padding: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+  // ==============================
+  // STATE
+  // ==============================
+  let state = {
+    auth: null,
+    username: '',
+    page: 'dashboard',
+    dashboard: null,
+    vip: null,
+    channelOpen: null,
+    users: null,
+    settings: null,
+    analyses: null,
+    analysisTab: 'gold',
+  };
+
+  const PAGES = [
+    { id: 'dashboard', label: 'داشبورد',   icon: '📊' },
+    { id: 'vip',       label: 'VIP',        icon: '💎' },
+    { id: 'analysis',  label: 'تحلیل',      icon: '📈' },
+    { id: 'users',     label: 'کاربران',     icon: '👥' },
+    { id: 'broadcast', label: 'پیام‌رسانی', icon: '📣' },
+    { id: 'settings',  label: 'تنظیمات',   icon: '⚙️' },
+  ];
+
+  const ASSETS = { gold: '🥇 طلا', dollar: '💵 دلار', bitcoin: '₿ بیتکوین' };
+
+  function setState(p) { Object.assign(state, p); render(); }
+
+  // ==============================
+  // API
+  // ==============================
+  const api = {
+    async req(method, path, body, isForm) {
+      const opts = { method, credentials: 'include', headers: {} };
+      if (body && !isForm) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+      if (body && isForm) { opts.body = body; }
+      const r = await fetch('/api' + path, opts);
+      return r.json();
+    },
+    get: (p) => api.req('GET', p),
+    post: (p, b) => api.req('POST', p, b),
+    postForm: (p, b) => api.req('POST', p, b, true),
+    del: (p) => api.req('DELETE', p),
+  };
+
+  // ==============================
+  // INIT
+  // ==============================
+  async function init() {
+    try {
+      const me = await api.get('/me');
+      if (me.authenticated) { setState({ auth: true, username: me.username }); loadPage('dashboard'); }
+      else setState({ auth: false });
+    } catch(e) { setState({ auth: false }); }
+  }
+
+  async function loadPage(page) {
+    try {
+      if (page === 'dashboard') {
+        const d = await api.get('/dashboard');
+        setState({ dashboard: d });
+        setTimeout(renderChart, 80);
+      }
+      if (page === 'vip') {
+        const [dv, dc] = await Promise.all([api.get('/vip'), api.get('/vip/channel')]);
+        setState({ vip: dv.vip, channelOpen: dc.open });
+      }
+      if (page === 'analysis') {
+        const d = await api.get('/analysis');
+        setState({ analyses: d.analyses });
+      }
+      if (page === 'users') {
+        const d = await api.get('/users');
+        setState({ users: d.users });
+      }
+      if (page === 'settings' && !state.settings) {
+        const d = await api.get('/settings');
+        setState({ settings: d });
+      }
+    } catch(e) { console.error(e); }
+  }
+
+  function navigate(page) { setState({ page }); loadPage(page); }
+
+  // ==============================
+  // RENDER
+  // ==============================
+  function render() {
+    const app = document.getElementById('app');
+    if (state.auth === null) { app.innerHTML = `<div class="login-wrap"><span class="spinner" style="width:36px;height:36px;border-width:3px"></span></div>`; return; }
+    if (!state.auth) { app.innerHTML = renderLogin(); bindLogin(); return; }
+    app.innerHTML = `
+      <div style="display:flex; flex-direction:row-reverse">
+        ${renderSidebar()}
+        <div class="main-content" style="flex:1">${renderPage()}</div>
+      </div>`;
+    bindPage();
+  }
+
+  // ==============================
+  // LOGIN
+  // ==============================
+  function renderLogin() {
+    return `<div class="login-wrap">
+      <div class="login-box">
+        <div style="text-align:center;margin-bottom:28px">
+          <div style="font-size:44px;margin-bottom:8px">💰</div>
+          <h1 class="section-title gold-text" style="margin:0">Money MAP</h1>
+          <p style="color:var(--muted);font-size:13px;margin:4px 0 0">پنل مدیریت</p>
+        </div>
+        <div style="margin-bottom:14px"><label class="lbl">نام کاربری / شماره موبایل</label><input id="lUser" class="input" placeholder="09xxxxxxxxx" /></div>
+        <div style="margin-bottom:18px"><label class="lbl">رمز عبور</label><input id="lPass" class="input" type="password" placeholder="••••••••" /></div>
+        <button id="lBtn" class="btn btn-gold" style="width:100%;justify-content:center;padding:11px">ورود</button>
+        <div id="lErr" style="display:none" class="alert alert-error"></div>
+      </div></div>`;
+  }
+  function bindLogin() {
+    document.getElementById('lBtn').onclick = doLogin;
+    document.getElementById('lPass').onkeydown = e => { if(e.key==='Enter') doLogin(); };
+  }
+  async function doLogin() {
+    const btn = document.getElementById('lBtn'); const err = document.getElementById('lErr');
+    btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true; err.style.display='none';
+    try {
+      const r = await api.post('/login', { username: document.getElementById('lUser').value.trim(), password: document.getElementById('lPass').value });
+      if (r.ok) { setState({ auth: true, username: r.username }); loadPage('dashboard'); }
+      else { err.textContent = r.error || 'خطا'; err.style.display='block'; }
+    } catch { err.textContent = 'خطا در ارتباط'; err.style.display='block'; }
+    finally { btn.innerHTML = 'ورود'; btn.disabled = false; }
+  }
+
+  // ==============================
+  // SIDEBAR
+  // ==============================
+  function renderSidebar() {
+    const items = PAGES.map(p => `<div class="nav-item ${state.page===p.id?'active':''}" data-page="${p.id}"><span>${p.icon}</span><span>${p.label}</span></div>`).join('');
+    return `<div class="sidebar">
+      <div style="padding:0 20px 20px;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:12px">
+        <div class="gold-text" style="font-size:18px;font-weight:800">💰 Money MAP</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px">${state.username}</div>
+      </div>
+      ${items}
+      <div style="flex:1"></div>
+      <div class="nav-item" id="logoutBtn"><span>🚪</span><span>خروج</span></div>
+    </div>`;
+  }
+
+  // ==============================
+  // PAGES
+  // ==============================
+  function renderPage() {
+    switch(state.page) {
+      case 'dashboard': return renderDashboard();
+      case 'vip':       return renderVip();
+      case 'analysis':  return renderAnalysis();
+      case 'users':     return renderUsers();
+      case 'broadcast': return renderBroadcast();
+      case 'settings':  return renderSettings();
+      default: return '';
+    }
+  }
+
+  // -- DASHBOARD --
+  function renderDashboard() {
+    const d = state.dashboard;
+    if (!d) return loading();
+    return `<div>
+      <div class="section-title gold-text">داشبورد</div>
+      <div class="section-sub">خلاصه وضعیت بات Money MAP</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:24px">
+        ${statCard('👥','کاربران کل', numFa(d.users_count),'#3b82f6')}
+        ${statCard('💎','VIP فعال', numFa(d.vip_count),'#d4a843')}
+        ${statCard('💵','قیمت VIP', d.vip_price_usdt+' USDT','#22c55e')}
+        ${statCard('📅','مدت اشتراک', d.vip_days+' روز','#a855f7')}
+      </div>
+      <div class="card"><div style="font-size:15px;font-weight:700;margin-bottom:16px">📊 رشد کاربران — ۷ روز اخیر</div><canvas id="growthChart" height="75"></canvas></div>
+    </div>`;
+  }
+  function statCard(icon, title, val, color) {
+    return `<div class="stat-card"><div style="display:flex;justify-content:space-between;align-items:start">
+      <div><div style="color:var(--muted);font-size:12px;font-weight:600;margin-bottom:6px">${title}</div><div style="font-size:22px;font-weight:800;color:${color}">${val}</div></div>
+      <div style="font-size:28px">${icon}</div></div></div>`;
+  }
+  function renderChart() {
+    const canvas = document.getElementById('growthChart');
+    if (!canvas || !state.dashboard) return;
+    const g = state.dashboard.growth || [];
+    new Chart(canvas, { type:'line', data:{ labels: g.map(x=>x.date||''), datasets:[{ label:'ثبت‌نام', data: g.map(x=>x.count||0), borderColor:'#d4a843', backgroundColor:'rgba(212,168,67,0.08)', tension:0.4, fill:true, pointBackgroundColor:'#d4a843' }] }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#6b7280',font:{family:'Vazirmatn'}},grid:{color:'rgba(255,255,255,0.05)'}}, y:{ticks:{color:'#6b7280',font:{family:'Vazirmatn'}},grid:{color:'rgba(255,255,255,0.05)'},beginAtZero:true} } } });
+  }
+
+  // -- VIP --
+  function renderVip() {
+    const vip = state.vip;
+    const isOpen = state.channelOpen;
+
+    // کارت ظرفیت کانال
+    const channelCard = `
+    <div class="channel-card ${isOpen===null?'':isOpen?'open':'closed'}">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="font-size:32px">${isOpen===null?'⏳':isOpen?'🔓':'🔒'}</div>
+        <div>
+          <div style="font-size:16px;font-weight:800;color:${isOpen===null?'var(--muted)':isOpen?'#22c55e':'#ef4444'}">
+            ${isOpen===null?'در حال بارگذاری...':isOpen?'ظرفیت کانال باز است':'ظرفیت کانال بسته است'}
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px">
+            ${isOpen===null?'':isOpen?'کاربران جدید می‌توانند اشتراک VIP بگیرند':'کاربران جدید امکان اشتراک ندارند — درخواست پرداخت بلاک می‌شود'}
+          </div>
+        </div>
+      </div>
+      <button id="channelToggleBtn" class="btn ${isOpen?'btn-danger':'btn-success'}" ${isOpen===null?'disabled':''}>
+        ${isOpen===null?'<span class="spinner"></span>':isOpen?'🔒 بستن ظرفیت':'🔓 باز کردن ظرفیت'}
+      </button>
+    </div>`;
+
+    const rows = vip ? vip.map(v => `
+      <tr>
+        <td style="font-weight:500">${esc(v.name||'—')}</td>
+        <td style="color:var(--muted);direction:ltr;text-align:right;font-size:12px">${esc(v.phone||'—')}</td>
+        <td>${vipBadge(v)}</td>
+        <td style="color:var(--muted);font-size:12px">${v.is_active?numFa(v.days)+' روز و '+numFa(v.hours)+' ساعت':'—'}</td>
+        <td style="color:var(--muted);font-size:12px">${esc(v.expire_str)}</td>
+        <td>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input class="input vip-d" data-id="${v.user_id}" style="width:56px;padding:5px 8px;font-size:12px;text-align:center" placeholder="30" />
+            <button class="btn btn-outline btn-sm vip-ext" data-id="${v.user_id}">تمدید</button>
+            <button class="btn btn-danger btn-sm vip-rm" data-id="${v.user_id}">🗑</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px;color:rgba(255,255,255,0.5);cursor:pointer;font-weight:400">
+            <input type="checkbox" class="vip-ntf" data-id="${v.user_id}" checked style="accent-color:var(--gold)" /> اطلاع به کاربر
+          </label>
+        </td>
+      </tr>`).join('') : '';
+
+    return `<div>
+      <div class="section-title gold-text">مدیریت اشتراک VIP 💎</div>
+      <div class="section-sub">فعال‌سازی، تمدید، مشاهده وضعیت و کنترل ظرفیت کانال</div>
+
+      ${channelCard}
+
+      <div class="card gold-ring" style="margin-bottom:20px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px">⚡ فعال‌سازی / تمدید سریع</div>
+        <div style="color:var(--muted);font-size:12px;margin-bottom:14px">شماره موبایل کاربر را وارد کن</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:180px"><label class="lbl">شماره موبایل</label><input id="qaPhone" class="input" placeholder="09121234567" /></div>
+          <div style="width:90px"><label class="lbl">تعداد روز</label><input id="qaDays" class="input" placeholder="30" style="text-align:center" /></div>
+          <button id="qaBtn" class="btn btn-gold">💎 فعال‌سازی</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12px;color:rgba(255,255,255,0.6);cursor:pointer;font-weight:400">
+          <input type="checkbox" id="qaNotify" checked style="accent-color:var(--gold)" /> به کاربر توی تلگرام اطلاع بده
+        </label>
+        <div id="qaMsg" style="display:none" class="alert"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700">اعضای VIP <span style="color:var(--muted);font-size:13px;font-weight:400">(${vip?numFa(vip.length):'...'}نفر)</span></div>
+          <button id="vipRef" class="btn btn-outline btn-sm">🔄 بارگذاری</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>اسم</th><th>شماره</th><th>وضعیت</th><th>باقی‌مانده</th><th>تاریخ انقضا</th><th>عملیات</th></tr></thead>
+            <tbody>${rows}${!vip?`<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">${loading(true)}</td></tr>`:''}${vip&&vip.length===0?`<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">هیچ عضو VIP پیدا نشد</td></tr>`:''}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }
+  function vipBadge(v) {
+    if (!v.is_active) return `<span class="badge badge-red">منقضی شده</span>`;
+    if (v.days <= 3) return `<span class="badge badge-gold">رو به اتمام</span>`;
+    return `<span class="badge badge-green">فعال</span>`;
+  }
+
+  // -- ANALYSIS --
+  function renderAnalysis() {
+    const tab = state.analysisTab;
+    const a = state.analyses ? state.analyses[tab] : null;
+    const tabs = Object.entries(ASSETS).map(([k,v]) => `<button class="tab-btn ${tab===k?'active':''}" data-asset="${k}">${v}</button>`).join('');
+
+    return `<div>
+      <div class="section-title gold-text">تحلیل بازارها 📈</div>
+      <div class="section-sub">ویرایش و مشاهده تحلیل هفتگی طلا، دلار و بیتکوین</div>
+      <div style="display:flex;gap:6px;margin-bottom:20px;background:rgba(255,255,255,0.04);padding:6px;border-radius:10px;width:fit-content">${tabs}</div>
+      ${!state.analyses?loading():`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:16px">📋 تحلیل فعلی — ${ASSETS[tab]}</div>
+          ${a&&a.analysis_date?`<div style="color:var(--muted);font-size:12px;margin-bottom:8px">📅 ${esc(a.analysis_date)}</div>`:''}
+          <div style="font-size:13px;line-height:1.8;white-space:pre-wrap;color:#d1d5db">${esc((a&&a.text)||'هنوز تحلیلی ثبت نشده')}</div>
+          ${a&&a.image_path?`<img src="/static/${esc(a.image_path)}" style="margin-top:14px;width:100%;border-radius:8px;max-height:220px;object-fit:cover" />`:''}
+        </div>
+        <div class="card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:16px">✏️ ویرایش تحلیل — ${ASSETS[tab]}</div>
+          <div style="display:grid;gap:12px">
+            <div><label class="lbl">تاریخ تحلیل</label><input id="aDate" class="input" value="${esc(a&&a.analysis_date||'')}" placeholder="مثلاً ۱۴۰۵/۰۵/۰۱" /></div>
+            <div><label class="lbl">متن تحلیل</label><textarea id="aText" class="input" rows="7">${esc(a&&a.text||'')}</textarea></div>
+            <div><label class="lbl">تصویر (اختیاری)</label><input id="aImage" type="file" accept="image/*" style="color:var(--muted);font-size:13px" /></div>
+            <button id="aSave" class="btn btn-gold" style="justify-content:center">💾 ذخیره تحلیل</button>
+            <div id="aMsg" style="display:none" class="alert"></div>
+          </div>
+        </div>
+      </div>`}
+    </div>`;
+  }
+
+  // -- USERS --
+  function renderUsers() {
+    const users = state.users;
+    const rows = users ? users.map(u => `
+      <tr>
+        <td style="color:var(--muted);font-size:12px">${numFa(u.user_id)}</td>
+        <td style="font-weight:500">${esc(u.name||'—')}</td>
+        <td style="color:var(--muted);direction:ltr;text-align:right;font-size:12px">${esc(u.phone||'—')}</td>
+        <td>${u.is_vip?`<span class="badge badge-gold">VIP</span>`:`<span class="badge" style="background:rgba(107,114,128,0.1);color:var(--muted);border:1px solid rgba(107,114,128,0.2)">عادی</span>`}</td>
+        <td style="color:var(--muted);font-size:12px">${numFa(u.referral_count||0)}</td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${!u.is_vip?`<button class="btn btn-outline btn-sm u-vip" data-id="${u.user_id}">💎 VIP</button>`:`<button class="btn btn-danger btn-sm u-uvip" data-id="${u.user_id}">حذف VIP</button>`}
+            <button class="btn btn-danger btn-sm u-del" data-id="${u.user_id}">🗑</button>
+          </div>
+        </td>
+      </tr>`).join('') : '';
+    return `<div>
+      <div class="section-title gold-text">مدیریت کاربران 👥</div>
+      <div class="section-sub">لیست تمام کاربران ثبت‌شده در بات</div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-size:15px;font-weight:700">کاربران <span style="color:var(--muted);font-size:13px;font-weight:400">(${users?numFa(users.length):'...'}نفر)</span></div>
+          <button id="usersRef" class="btn btn-outline btn-sm">🔄 بارگذاری</button>
+        </div>
+        ${!users?loading():`<div style="overflow-x:auto"><table><thead><tr><th>ID</th><th>اسم</th><th>شماره</th><th>نوع</th><th>رفرال</th><th>عملیات</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+      </div>
+    </div>`;
+  }
+
+  // -- BROADCAST --
+  function renderBroadcast() {
+    return `<div>
+      <div class="section-title gold-text">پیام‌رسانی 📣</div>
+      <div class="section-sub">ارسال پیام گروهی به کاربران</div>
+      <div class="card" style="max-width:600px">
+        <div style="margin-bottom:14px"><label class="lbl">مخاطبان</label>
+          <select id="bcTgt" class="input"><option value="all">همه کاربران</option><option value="vip">فقط VIP</option><option value="novip">بدون VIP</option></select>
+        </div>
+        <div style="margin-bottom:18px"><label class="lbl">متن پیام</label><textarea id="bcTxt" class="input" rows="5" placeholder="متن پیام را اینجا بنویس..."></textarea></div>
+        <button id="bcBtn" class="btn btn-gold">📤 ارسال</button>
+        <div id="bcMsg" style="display:none" class="alert"></div>
+      </div>
+    </div>`;
+  }
+
+  // -- SETTINGS --
+  function renderSettings() {
+    const s = state.settings;
+    if (!s) return loading();
+    return `<div>
+      <div class="section-title gold-text">تنظیمات ⚙️</div>
+      <div class="section-sub">پیکربندی بات و اشتراک VIP</div>
+      <div class="card" style="max-width:480px">
+        <div style="display:grid;gap:16px">
+          <div><label class="lbl">قیمت اشتراک VIP (USDT)</label><input id="sPrice" class="input" type="number" step="0.1" value="${s.vip_price_usdt}" /></div>
+          <div><label class="lbl">مدت اشتراک (روز)</label><input id="sDays" class="input" type="number" value="${s.vip_days}" /></div>
+          <div><label class="lbl">تعداد رفرال برای VIP رایگان</label><input id="sRef" class="input" type="number" value="${s.referral_required_count}" /></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px">
+            <span style="font-size:14px;font-weight:500">سیستم رفرال فعال</span>
+            <input type="checkbox" id="sRefOn" ${s.referral_enabled?'checked':''} style="width:18px;height:18px;accent-color:var(--gold);cursor:pointer" />
+          </div>
+          <button id="sSave" class="btn btn-gold" style="justify-content:center">💾 ذخیره</button>
+          <div id="sMsg" style="display:none" class="alert"></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ==============================
+  // BIND
+  // ==============================
+  function bindPage() {
+    document.querySelectorAll('[data-page]').forEach(el => el.onclick = () => navigate(el.dataset.page));
+    const lb = document.getElementById('logoutBtn');
+    if (lb) lb.onclick = async () => { await api.post('/logout'); setState({ auth:false, dashboard:null, vip:null, users:null, settings:null, analyses:null }); };
+
+    if (state.page==='dashboard') renderChart();
+    if (state.page==='vip') bindVip();
+    if (state.page==='analysis') bindAnalysis();
+    if (state.page==='users') bindUsers();
+    if (state.page==='broadcast') bindBroadcast();
+    if (state.page==='settings') bindSettings();
+  }
+
+  function bindVip() {
+    // ظرفیت کانال toggle
+    const tBtn = document.getElementById('channelToggleBtn');
+    if (tBtn) tBtn.onclick = async () => {
+      tBtn.innerHTML = '<span class="spinner"></span>'; tBtn.disabled = true;
+      const r = await api.post('/vip/channel', { open: !state.channelOpen });
+      setState({ channelOpen: r.open });
+    };
+
+    // refresh
+    const ref = document.getElementById('vipRef');
+    if (ref) ref.onclick = async () => {
+      setState({ vip: null, channelOpen: null });
+      const [dv, dc] = await Promise.all([api.get('/vip'), api.get('/vip/channel')]);
+      setState({ vip: dv.vip, channelOpen: dc.open });
+    };
+
+    // quick activate
+    const qaBtn = document.getElementById('qaBtn');
+    if (qaBtn) qaBtn.onclick = async () => {
+      const phone = document.getElementById('qaPhone').value.trim();
+      const days = parseInt(document.getElementById('qaDays').value)||0;
+      const notify = document.getElementById('qaNotify').checked;
+      const msg = document.getElementById('qaMsg');
+      msg.style.display='none';
+      if (!phone) { showMsg(msg,'شماره موبایل را وارد کن.','error'); return; }
+      qaBtn.innerHTML='<span class="spinner"></span>'; qaBtn.disabled=true;
+      try {
+        const r = await api.post('/vip/activate', { phone, days:days||undefined, notify });
+        if (r.ok) { showMsg(msg,'✅ اشتراک با موفقیت فعال/تمدید شد.','success'); document.getElementById('qaPhone').value=''; document.getElementById('qaDays').value=''; const d=await api.get('/vip'); setState({vip:d.vip}); }
+        else showMsg(msg, r.error||'خطایی رخ داد.','error');
+      } catch { showMsg(msg,'خطا در ارتباط با سرور.','error'); }
+      finally { qaBtn.innerHTML='💎 فعال‌سازی'; qaBtn.disabled=false; }
+    };
+
+    // extend
+    document.querySelectorAll('.vip-ext').forEach(btn => {
+      btn.onclick = async () => {
+        const id = parseInt(btn.dataset.id);
+        const di = document.querySelector(`.vip-d[data-id="${id}"]`);
+        const days = parseInt(di&&di.value)||30;
+        const notify = document.querySelector(`.vip-ntf[data-id="${id}"]`)?.checked??true;
+        btn.innerHTML='<span class="spinner"></span>'; btn.disabled=true;
+        await api.post(`/vip/${id}/extend`, {days, notify});
+        const d = await api.get('/vip'); setState({vip:d.vip});
+      };
+    });
+
+    // remove
+    document.querySelectorAll('.vip-rm').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('اشتراک این کاربر حذف شود؟')) return;
+        const id = parseInt(btn.dataset.id);
+        const notify = document.querySelector(`.vip-ntf[data-id="${id}"]`)?.checked??true;
+        btn.innerHTML='<span class="spinner"></span>'; btn.disabled=true;
+        await api.post(`/vip/${id}/remove`, {notify});
+        const d = await api.get('/vip'); setState({vip:d.vip});
+      };
+    });
+  }
+
+  function bindAnalysis() {
+    // tab switch
+    document.querySelectorAll('[data-asset]').forEach(btn => {
+      btn.onclick = () => { setState({analysisTab: btn.dataset.asset}); };
+    });
+
+    const savBtn = document.getElementById('aSave');
+    if (!savBtn) return;
+    savBtn.onclick = async () => {
+      const msg = document.getElementById('aMsg');
+      msg.style.display='none';
+      savBtn.innerHTML='<span class="spinner"></span>'; savBtn.disabled=true;
+      try {
+        const fd = new FormData();
+        fd.append('asset', state.analysisTab);
+        fd.append('analysis_date', document.getElementById('aDate').value.trim());
+        fd.append('text', document.getElementById('aText').value.trim());
+        const imgFile = document.getElementById('aImage').files[0];
+        if (imgFile) fd.append('image', imgFile);
+        const r = await api.postForm('/analysis', fd);
+        if (r.ok) {
+          showMsg(msg,'✅ تحلیل ذخیره شد.','success');
+          const d = await api.get('/analysis'); setState({analyses: d.analyses});
+        } else showMsg(msg, r.error||'خطا','error');
+      } catch { showMsg(msg,'خطا در ارتباط','error'); }
+      finally { savBtn.innerHTML='💾 ذخیره تحلیل'; savBtn.disabled=false; }
+    };
+  }
+
+  function bindUsers() {
+    const ref = document.getElementById('usersRef');
+    if (ref) ref.onclick = async () => { setState({users:null}); const d=await api.get('/users'); setState({users:d.users}); };
+    document.querySelectorAll('.u-vip').forEach(btn => {
+      btn.onclick = async () => {
+        const days = parseInt(prompt('تعداد روز:','30'))||30;
+        await api.post(`/users/${btn.dataset.id}/activate-vip`, {days, notify:true});
+        const d=await api.get('/users'); setState({users:d.users});
+      };
+    });
+    document.querySelectorAll('.u-uvip').forEach(btn => {
+      btn.onclick = async () => { if(!confirm('VIP این کاربر حذف شود؟'))return; await api.post(`/users/${btn.dataset.id}/remove-vip`,{notify:true}); const d=await api.get('/users'); setState({users:d.users}); };
+    });
+    document.querySelectorAll('.u-del').forEach(btn => {
+      btn.onclick = async () => { if(!confirm('کاربر حذف شود؟'))return; await api.del(`/users/${btn.dataset.id}`); const d=await api.get('/users'); setState({users:d.users}); };
+    });
+  }
+
+  function bindBroadcast() {
+    const btn = document.getElementById('bcBtn');
+    if (!btn) return;
+    btn.onclick = async () => {
+      const txt = document.getElementById('bcTxt').value.trim();
+      const tgt = document.getElementById('bcTgt').value;
+      const msg = document.getElementById('bcMsg');
+      if (!txt) { showMsg(msg,'متن را وارد کن.','error'); return; }
+      btn.innerHTML='<span class="spinner"></span>'; btn.disabled=true;
+      try {
+        const r = await api.post('/broadcast', {text:txt, target:tgt});
+        if (r.ok) showMsg(msg,`✅ ارسال شد: ${numFa(r.sent)} موفق، ${numFa(r.failed)} ناموفق از ${numFa(r.total)} نفر`,'success');
+        else showMsg(msg,r.error||'خطا','error');
+      } catch { showMsg(msg,'خطا','error'); }
+      finally { btn.innerHTML='📤 ارسال'; btn.disabled=false; }
+    };
+  }
+
+  function bindSettings() {
+    const btn = document.getElementById('sSave');
+    if (!btn) return;
+    btn.onclick = async () => {
+      const msg = document.getElementById('sMsg');
+      btn.innerHTML='<span class="spinner"></span>'; btn.disabled=true;
+      try {
+        const r = await api.post('/settings', { vip_price_usdt: parseFloat(document.getElementById('sPrice').value), vip_days: parseInt(document.getElementById('sDays').value), referral_required_count: parseInt(document.getElementById('sRef').value), referral_enabled: document.getElementById('sRefOn').checked });
+        if (r.ok) { showMsg(msg,'✅ ذخیره شد.','success'); const d=await api.get('/settings'); setState({settings:d}); }
+        else showMsg(msg,'خطا','error');
+      } catch { showMsg(msg,'خطا','error'); }
+      finally { btn.innerHTML='💾 ذخیره'; btn.disabled=false; }
+    };
+  }
+
+  // ==============================
+  // HELPERS
+  // ==============================
+  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function numFa(n) { return String(n).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]); }
+  function showMsg(el, msg, type) { el.textContent=msg; el.className=`alert alert-${type}`; el.style.display='block'; setTimeout(()=>{el.style.display='none';},6000); }
+  function loading(inline) { return inline ? `<span class="spinner"></span>` : `<div style="text-align:center;padding:60px"><span class="spinner" style="width:32px;height:32px;border-width:3px"></span></div>`; }
+
+  // ==============================
+  // START
+  // ==============================
+  init();
+  </script>
+</body>
+</html>
