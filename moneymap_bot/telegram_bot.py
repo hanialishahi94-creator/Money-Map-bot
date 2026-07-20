@@ -1582,6 +1582,18 @@ async def vip_pay_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # بررسی ظرفیت کانال VIP
+    if not db.is_vip_channel_open():
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
+        ])
+        await query.message.reply_text(
+            "🔒 متأسفانه در حال حاضر ظرفیت کانال VIP تکمیل شده است.\n\n"
+            "عضوگیری جدید موقتاً متوقف شده. بعداً دوباره تلاش کن! 🙏",
+            reply_markup=keyboard,
+        )
+        return MAIN_MENU
+
     vip_price_usdt = _vip_price_usdt()
     usdt_price = await fetch_usdt_price()
     if usdt_price:
