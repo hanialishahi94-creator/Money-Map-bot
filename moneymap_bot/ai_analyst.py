@@ -33,12 +33,6 @@ ASSETS = {
 }
 
 
-GEMINI_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-pro",
-    "gemini-pro",
-]
 
 
 async def _fetch_market_data(ticker: str) -> dict:
@@ -96,37 +90,24 @@ async def _search_analyst_opinions(query: str) -> str:
     return await loop.run_in_executor(None, _search)
 
 
-async def _call_gemini(prompt: str) -> str:
-    """ارسال مستقیم به Gemini REST API — بدون SDK، امن‌تر."""
-    import aiohttp
-    api_key = os.getenv("GEMINI_API_KEY")
+async def _call_groq(prompt: str) -> str:
+    """ارسال پرامپت به Groq API (رایگان، سریع، مدل Llama 3.1)."""
+    from openai import AsyncOpenAI
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise RuntimeError("متغیر محیطی GEMINI_API_KEY تنظیم نشده است.")
+        raise RuntimeError("متغیر محیطی GROQ_API_KEY تنظیم نشده. از console.groq.com کلید رایگان بگیر.")
 
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1600},
-    }
-
-    last_error = None
-    async with aiohttp.ClientSession() as session:
-        for model in GEMINI_MODELS:
-            url = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model}:generateContent?key={api_key}"
-            )
-            try:
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    data = await resp.json()
-                    if resp.status == 200:
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
-                    last_error = f"{resp.status} {data}"
-                    logger.warning(f"Model {model} failed: {last_error}")
-            except Exception as e:
-                last_error = str(e)
-                logger.warning(f"Model {model} exception: {e}")
-
-    raise RuntimeError(f"هیچ مدل Gemini در دسترس نیست. آخرین خطا: {last_error}")
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1",
+    )
+    response = await client.chat.completions.create(
+        model="llama-3.1-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=1600,
+    )
+    return response.choices[0].message.content
 
 
 async def generate_analysis(asset_key: str) -> str:
@@ -177,7 +158,7 @@ async def generate_analysis(asset_key: str) -> str:
 
 قالب: پاراگراف‌های کوتاه فارسی روان. حدود ۳۰۰ کلمه. حرفه‌ای و قابل اعتماد."""
 
-    return await _call_gemini(prompt)
+    return await _call_groq(prompt)
 
 
 async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) -> str:
@@ -193,4 +174,4 @@ async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) ->
 
 تحلیل رو دقیقاً طبق دستور ویرایش کن. ساختار ۵ بخشی و فرمت فارسی رو حفظ کن."""
 
-    return await _call_gemini(prompt)
+    return await _call_groq(prompt)
