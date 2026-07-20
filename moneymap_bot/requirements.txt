@@ -10,3 +10,4 @@ yfinance
 duckduckgo-search
 pytz
 google-generativeai
+httpx

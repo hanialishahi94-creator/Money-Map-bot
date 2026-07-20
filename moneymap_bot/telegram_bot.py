@@ -2432,7 +2432,20 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
     asset_key = edit_data["asset_key"]
     original_text = edit_data["original_text"]
     original_msg_id = edit_data["analysis_msg_id"]
-    edit_prompt = msg.text or ""
+    # دریافت متن یا تبدیل ویس به متن
+    if msg.voice:
+        try:
+            voice_file = await msg.voice.get_file()
+            import io
+            voice_bytes = await voice_file.download_as_bytearray()
+            import ai_analyst as _ai
+            edit_prompt = await _ai.transcribe_voice(bytes(voice_bytes), "voice.ogg")
+            await msg.reply_text(f"🎤 دریافت شد: «{edit_prompt}»")
+        except Exception as e:
+            await msg.reply_text(f"❌ خطا در تبدیل ویس: {e}")
+            return
+    else:
+        edit_prompt = msg.text or ""
 
     import pytz as _pytz, datetime as _dt
     _tehran = _pytz.timezone("Asia/Tehran")
@@ -2585,7 +2598,7 @@ def main():
     app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
     # این handler باید با group=-1 ثبت بشه تا قبل از ConversationHandler اجرا بشه
     app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & filters.REPLY,
+        filters.ChatType.GROUPS & (filters.TEXT | filters.VOICE),
         ai_edit_prompt_handler,
     ), group=-1)
 

@@ -165,6 +165,25 @@ async def _call_groq(prompt: str) -> str:
     return _clean_ai_output(result)
 
 
+async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> str:
+    """تبدیل ویس به متن با Groq Whisper (رایگان)."""
+    import httpx
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY تنظیم نشده")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": (filename, file_bytes, "audio/ogg")},
+            data={"model": "whisper-large-v3", "language": "fa", "response_format": "text"},
+        )
+        response.raise_for_status()
+        return response.text.strip()
+
+
+
 async def generate_analysis(asset_key: str) -> str:
     """تولید تحلیل روزانه برای یک دارایی."""
     asset = ASSETS[asset_key]
