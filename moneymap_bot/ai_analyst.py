@@ -33,16 +33,14 @@ ASSETS = {
 }
 
 
-def _openai_client():
-    """کلاینت Gemini از طریق endpoint سازگار با OpenAI (رایگان)."""
-    from openai import AsyncOpenAI
+def _gemini_model():
+    """مدل Gemini با SDK اصلی Google."""
+    import google.generativeai as genai
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("متغیر محیطی GEMINI_API_KEY تنظیم نشده است. از https://aistudio.google.com/apikey کلید رایگان بگیر.")
-    return AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-    )
+        raise RuntimeError("متغیر محیطی GEMINI_API_KEY تنظیم نشده است.")
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 
 async def _fetch_market_data(ticker: str) -> dict:
@@ -81,7 +79,7 @@ async def _fetch_market_data(ticker: str) -> dict:
 
 
 async def _search_analyst_opinions(query: str) -> str:
-    """جستجوی آنلاین نظرات تحلیلگران با DuckDuckGo (رایگان، بدون API Key)."""
+    """جستجوی آنلاین نظرات تحلیلگران با DuckDuckGo (رایگان)."""
     loop = asyncio.get_event_loop()
 
     def _search():
@@ -100,10 +98,21 @@ async def _search_analyst_opinions(query: str) -> str:
     return await loop.run_in_executor(None, _search)
 
 
+async def _call_gemini(prompt: str) -> str:
+    """ارسال پرامپت به Gemini و دریافت پاسخ (non-blocking)."""
+    loop = asyncio.get_event_loop()
+
+    def _generate():
+        model = _gemini_model()
+        response = model.generate_content(prompt)
+        return response.text
+
+    return await loop.run_in_executor(None, _generate)
+
+
 async def generate_analysis(asset_key: str) -> str:
-    """تولید تحلیل روزانه برای یک دارایی با GPT-4o."""
+    """تولید تحلیل روزانه برای یک دارایی."""
     asset = ASSETS[asset_key]
-    client = _openai_client()
     today = datetime.datetime.now(TEHRAN_TZ).strftime("%Y/%m/%d")
 
     market_data = await _fetch_market_data(asset["ticker"])
@@ -149,19 +158,12 @@ async def generate_analysis(asset_key: str) -> str:
 
 قالب: پاراگراف‌های کوتاه فارسی روان. حدود ۳۰۰ کلمه. حرفه‌ای و قابل اعتماد."""
 
-    response = await client.chat.completions.create(
-        model="gemini-1.5-flash",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=1600,
-    )
-    return response.choices[0].message.content
+    return await _call_gemini(prompt)
 
 
 async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) -> str:
     """ویرایش تحلیل موجود بر اساس دستور ادمین."""
     asset = ASSETS[asset_key]
-    client = _openai_client()
 
     prompt = f"""تحلیل زیر برای {asset['fa_name']} نوشته شده:
 
@@ -172,10 +174,4 @@ async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) ->
 
 تحلیل رو دقیقاً طبق دستور ویرایش کن. ساختار ۵ بخشی و فرمت فارسی رو حفظ کن."""
 
-    response = await client.chat.completions.create(
-        model="gemini-1.5-flash",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
-        max_tokens=1600,
-    )
-    return response.choices[0].message.content
+    return await _call_gemini(prompt)

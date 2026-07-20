@@ -9,3 +9,4 @@ openai
 yfinance
 duckduckgo-search
 pytz
+google-generativeai
