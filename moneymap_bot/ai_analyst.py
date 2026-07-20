@@ -33,14 +33,12 @@ ASSETS = {
 }
 
 
-def _gemini_model():
-    """مدل Gemini با SDK اصلی Google."""
-    import google.generativeai as genai
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("متغیر محیطی GEMINI_API_KEY تنظیم نشده است.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+GEMINI_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro",
+    "gemini-pro",
+]
 
 
 async def _fetch_market_data(ticker: str) -> dict:
@@ -99,15 +97,36 @@ async def _search_analyst_opinions(query: str) -> str:
 
 
 async def _call_gemini(prompt: str) -> str:
-    """ارسال پرامپت به Gemini و دریافت پاسخ (non-blocking)."""
-    loop = asyncio.get_event_loop()
+    """ارسال مستقیم به Gemini REST API — بدون SDK، امن‌تر."""
+    import aiohttp
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("متغیر محیطی GEMINI_API_KEY تنظیم نشده است.")
 
-    def _generate():
-        model = _gemini_model()
-        response = model.generate_content(prompt)
-        return response.text
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1600},
+    }
 
-    return await loop.run_in_executor(None, _generate)
+    last_error = None
+    async with aiohttp.ClientSession() as session:
+        for model in GEMINI_MODELS:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={api_key}"
+            )
+            try:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    data = await resp.json()
+                    if resp.status == 200:
+                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                    last_error = f"{resp.status} {data}"
+                    logger.warning(f"Model {model} failed: {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Model {model} exception: {e}")
+
+    raise RuntimeError(f"هیچ مدل Gemini در دسترس نیست. آخرین خطا: {last_error}")
 
 
 async def generate_analysis(asset_key: str) -> str:
