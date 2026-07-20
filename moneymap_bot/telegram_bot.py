@@ -2393,24 +2393,32 @@ async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_id = query.message.message_id
     key = f"{asset_key}:{msg_id}"
 
+    # متن اصلی رو از ai_pending یا از db بگیر
     pending = context.bot_data.get("ai_pending", {})
-    if key not in pending:
-        await query.answer("⚠️ تحلیل یافت نشد!", show_alert=True)
-        return
-
-    if "ai_edit_waiting" not in context.bot_data:
-        context.bot_data["ai_edit_waiting"] = {}
+    if key in pending:
+        original_text = pending[key]["text"]
+        today = pending[key]["date"]
+    else:
+        # fallback: متن فعلی ذخیره‌شده در db
+        row = db.get_analysis(asset_key)
+        if not row or not row.get("text"):
+            await query.answer("⚠️ تحلیل یافت نشد!", show_alert=True)
+            return
+        original_text = row["text"]
+        today = row.get("analysis_date", "")
 
     prompt_msg = await query.message.reply_text(
         "✏️ پرامپت ویرایشت رو ریپلای کن روی همین پیام 👇\n\n"
-        "مثال: «کوتاه‌ترش کن» / «تکنیکالی‌تر باشه» / «لحن رسمی‌تر باشه»"
+        "مثال: «کوتاهترش کن» / «تکنیکالی‌تر باشه» / «لحن رسمی‌تر باشه»"
     )
 
-    context.bot_data["ai_edit_waiting"][prompt_msg.message_id] = {
-        "pending_key": key,
-        "asset_key": asset_key,
-        "original_msg_id": msg_id,
-    }
+    # ذخیره در SQLite به جای bot_data (بعد از ری‌استارت هم باقی می‌مونه)
+    db.set_ai_edit_waiting(
+        prompt_msg_id=prompt_msg.message_id,
+        asset_key=asset_key,
+        original_text=original_text,
+        analysis_msg_id=msg_id,
+    )
 
 
 async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2422,30 +2430,36 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     replied_id = msg.reply_to_message.message_id
-    waiting = context.bot_data.get("ai_edit_waiting", {})
-    if replied_id not in waiting:
+
+    # از SQLite بخون (بعد از ری‌استارت هم کار می‌کنه)
+    edit_data = db.get_ai_edit_waiting(replied_id)
+    if not edit_data:
         return
 
-    edit_data = waiting.pop(replied_id)
+    db.clear_ai_edit_waiting(replied_id)
+
     asset_key = edit_data["asset_key"]
-    pending_key = edit_data["pending_key"]
-    original_msg_id = edit_data["original_msg_id"]
+    original_text = edit_data["original_text"]
+    original_msg_id = edit_data["analysis_msg_id"]
     edit_prompt = msg.text or ""
 
-    pending = context.bot_data.get("ai_pending", {})
-    if pending_key not in pending:
-        await msg.reply_text("❌ تحلیل یافت نشد در حافظه!")
-        return
-
-    original_text = pending[pending_key]["text"]
-    today = pending[pending_key]["date"]
+    import pytz as _pytz, datetime as _dt
+    _tehran = _pytz.timezone("Asia/Tehran")
+    today = _dt.datetime.now(_tehran).strftime("%Y/%m/%d")
 
     thinking = await msg.reply_text("⏳ در حال ویرایش با AI...")
 
     try:
         import ai_analyst
         new_text = await ai_analyst.edit_analysis(original_text, edit_prompt, asset_key)
-        pending[pending_key]["text"] = new_text
+
+        # ai_pending رو هم آپدیت کن
+        pending = context.bot_data.setdefault("ai_pending", {})
+        pending_key = f"{asset_key}:{original_msg_id}"
+        if pending_key in pending:
+            pending[pending_key]["text"] = new_text
+        else:
+            pending[pending_key] = {"text": new_text, "date": today}
 
         asset = ai_analyst.ASSETS[asset_key]
         new_caption = (

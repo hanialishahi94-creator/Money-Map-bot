@@ -8,6 +8,7 @@
 import sqlite3
 import time
 import os
+import json
 from contextlib import contextmanager
 
 DB_PATH = os.getenv("DB_PATH", "/data/moneymap.db" if os.path.isdir("/data") else "moneymap.db")
@@ -523,6 +524,35 @@ def get_previous_car_prices(hours_ago: int = 20) -> dict:
     except Exception:
         pass
     return result
+
+
+# ---------- ویرایش تحلیل AI (پایدار در SQLite) ----------
+
+def set_ai_edit_waiting(prompt_msg_id: int, asset_key: str, original_text: str, analysis_msg_id: int):
+    """ذخیره اطلاعات ویرایش در انتظار — در SQLite تا بعد از ری‌استارت باقی بماند."""
+    data = json.dumps({
+        "asset_key": asset_key,
+        "original_text": original_text,
+        "analysis_msg_id": analysis_msg_id,
+    })
+    set_setting(f"ai_edit:{prompt_msg_id}", data)
+
+
+def get_ai_edit_waiting(prompt_msg_id: int):
+    """دریافت اطلاعات ویرایش در انتظار با شناسه پیام درخواست."""
+    val = get_setting(f"ai_edit:{prompt_msg_id}")
+    if not val:
+        return None
+    try:
+        return json.loads(val)
+    except Exception:
+        return None
+
+
+def clear_ai_edit_waiting(prompt_msg_id: int):
+    """حذف رکورد ویرایش بعد از پردازش."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (f"ai_edit:{prompt_msg_id}",))
 
 
 # هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند
