@@ -1,5 +1,5 @@
 """
-ai_analyst.py — تولید خودکار تحلیل روزانه با Google Gemini (رایگان)
+ai_analyst.py — تولید خودکار تحلیل روزانه با Groq LLaMA
 """
 import os
 import re
@@ -12,158 +12,81 @@ import pytz
 logger = logging.getLogger(__name__)
 TEHRAN_TZ = pytz.timezone("Asia/Tehran")
 
-
-def _clean_search_text(text: str) -> str:
-    """حذف کاراکترهای غیرفارسی و غیرانگلیسی از متن سرچ."""
-    # فقط ASCII پایه (0x00-0x7F) + فارسی/عربی (U+0600-U+06FF) + نیم‌فاصله
-    cleaned = re.sub(r'[^\x00-\x7F\u0600-\u06FF\u200c\u200d]', '', text)
-    return cleaned
-
-
-def _clean_ai_output(text: str) -> str:
-    """حذف کلمات کاملاً غیرفارسی و غیرانگلیسی از خروجی AI."""
-    # کلماتی که فقط از حروف لاتین تشکیل شده و بیشتر از ۵ کاراکترند رو چک کن
-    # اصطلاحات مالی معمول (ETF, DXY, GDP, NFP, CPI, ATH, BTC, ...) رو نگه‌دار
-    allowed_terms = {
-        'etf', 'dxy', 'gdp', 'nfp', 'cpi', 'fomc', 'fed', 'btc', 'xau', 'ath',
-        'rsi', 'ema', 'sma', 'macd', 'usd', 'usdt', 'ai', 'on', 'chain',
-        'put', 'call', 'open', 'interest', 'funding', 'rate', 'whale', 'spot',
-        'long', 'short', 'bull', 'bear', 'halving', 'etf', 'sec', 'us', 'uk',
-    }
-    def replace_word(m):
-        word = m.group(0)
-        if word.lower() in allowed_terms or len(word) <= 4:
-            return word
-        # اگه کلمه لاتین بلند بود و توی لیست مجاز نبود، حذفش کن
-        return ''
-    # فقط کلمات خالص لاتین که بین فاصله‌ها هستن رو چک کن
-    return re.sub(r'(?<![\u0600-\u06FF])\b[a-zA-Z]{5,}\b(?![\u0600-\u06FF])', replace_word, text)
-
-
+# ─── تعریف دارایی‌ها ───────────────────────────────────────────────────────────
 ASSETS = {
-    "gold": {
-        "fa_name": "اونس جهانی طلا",
-        "emoji": "🥇",
-        "ticker": "GC=F",
-        "search_query": "XAU gold ounce price analysis forecast analysts position today",
+    "bitcoin": {
+        "ticker": "BTC-USD",
+        "search_query": "bitcoin BTC price analysis forecast today",
+        "fa_name": "بیتکوین",
     },
     "dollar": {
-        "fa_name": "شاخص دلار (DXY)",
-        "emoji": "💵",
         "ticker": "DX-Y.NYB",
-        "search_query": "DXY dollar index analysis forecast analysts today",
+        "search_query": "DXY dollar index analysis forecast today",
+        "fa_name": "شاخص دلار",
     },
-    "bitcoin": {
-        "fa_name": "بیتکوین",
-        "emoji": "₿",
-        "ticker": "BTC-USD",
-        "search_query": "Bitcoin BTC price analysis forecast traders position today",
+    "gold": {
+        "ticker": "GC=F",
+        "search_query": "gold XAU USD price analysis forecast today",
+        "fa_name": "اونس جهانی طلا",
     },
 }
 
 
+# ─── توابع پاک‌سازی متن ────────────────────────────────────────────────────────
+
+def _is_word_clean(word: str) -> bool:
+    """
+    True اگه کلمه فقط حاوی کاراکترهای مجاز باشه:
+    ASCII + فارسی/عربی + ایموجی + نمادهای رایج
+    هر کاراکتر سیریلیک (روسی)، چینی، ترکی-لاتین و غیره → False
+    """
+    for ch in word:
+        code = ord(ch)
+        if code <= 0x7F:
+            continue                            # ASCII (انگلیسی، ارقام، نشانه‌گذاری)
+        if 0x0600 <= code <= 0x06FF:
+            continue                            # فارسی/عربی
+        if 0xFB50 <= code <= 0xFDFF:
+            continue                            # Arabic Presentation Forms-A
+        if 0xFE70 <= code <= 0xFEFF:
+            continue                            # Arabic Presentation Forms-B
+        if ch in "‌‍​،؛؟":
+            continue                            # نیم‌فاصله، علائم فارسی
+        if 0x2000 <= code <= 0x27FF:
+            continue                            # نمادها، پیکان‌ها، Dingbats
+        if 0x1F000 <= code <= 0x1FFFF:
+            continue                            # ایموجی (📊🎯🏦 و ...)
+        if 0xFE00 <= code <= 0xFE0F:
+            continue                            # Variation Selectors (برای ایموجی)
+        return False                            # بقیه (روسی، چینی، ترکی-لاتین) → حذف
+    return True
 
 
-async def _fetch_market_data(ticker: str) -> dict:
-    """دریافت داده‌های قیمتی از yfinance (non-blocking)."""
-    loop = asyncio.get_event_loop()
-
-    def _fetch():
-        try:
-            import yfinance as yf
-            t = yf.Ticker(ticker)
-            hist = t.history(period="5d", interval="1d")
-            if hist.empty:
-                return {}
-            latest = hist.iloc[-1]
-            prev = hist.iloc[-2] if len(hist) > 1 else hist.iloc[0]
-            change = latest["Close"] - prev["Close"]
-            change_pct = (change / prev["Close"]) * 100
-            return {
-                "price": round(float(latest["Close"]), 2),
-                "open": round(float(latest["Open"]), 2),
-                "high": round(float(latest["High"]), 2),
-                "low": round(float(latest["Low"]), 2),
-                "prev_close": round(float(prev["Close"]), 2),
-                "change": round(float(change), 2),
-                "change_pct": round(float(change_pct), 2),
-                "recent": [
-                    {"d": str(hist.index[i].date()), "c": round(float(hist.iloc[i]["Close"]), 2)}
-                    for i in range(len(hist))
-                ],
-            }
-        except Exception as e:
-            logger.warning(f"yfinance fetch failed for {ticker}: {e}")
-            return {}
-
-    return await loop.run_in_executor(None, _fetch)
+def _clean_search_text(text: str) -> str:
+    """حذف کامل کلمات حاوی کاراکتر غیرمجاز از متن ورودی سرچ."""
+    words = text.split()
+    clean_words = [w for w in words if _is_word_clean(w)]
+    return " ".join(clean_words)
 
 
-async def _search_analyst_opinions(query: str) -> str:
-    """جستجوی آنلاین نظرات تحلیلگران با DuckDuckGo (رایگان)."""
-    loop = asyncio.get_event_loop()
-
-    def _search():
-        try:
-            from duckduckgo_search import DDGS
-            results = []
-            with DDGS() as ddgs:
-                for r in ddgs.text(query, max_results=6):
-                    snippet = _clean_search_text(r.get("body", ""))[:280]
-                    title = _clean_search_text(r.get("title", ""))
-                    results.append(f"• {title}: {snippet}")
-            return "\n".join(results) if results else "نتیجه‌ای یافت نشد."
-        except Exception as e:
-            logger.warning(f"DuckDuckGo search failed: {e}")
-            return "جستجوی آنلاین در دسترس نیست."
-
-    return await loop.run_in_executor(None, _search)
+def _clean_ai_output(text: str) -> str:
+    """
+    حذف کامل کلمات حاوی کاراکتر غیرمجاز از خروجی AI.
+    ایموجی، فارسی، انگلیسی و نمادهای رایج حفظ می‌شن.
+    کلمات روسی (немного)، چینی (析、分) و مشابه حذف می‌شن.
+    """
+    lines = text.split("\n")
+    clean_lines = []
+    for line in lines:
+        words = line.split(" ")
+        clean_words = [w for w in words if _is_word_clean(w)]
+        clean_lines.append(" ".join(clean_words))
+    result = "\n".join(clean_lines)
+    result = re.sub(r" {2,}", " ", result)
+    return result.strip()
 
 
-async def _search_economic_calendar(today: str) -> str:
-    """جستجوی داده‌های مهم اقتصادی امروز."""
-    loop = asyncio.get_event_loop()
-
-    def _search():
-        try:
-            from duckduckgo_search import DDGS
-            results = []
-            with DDGS() as ddgs:
-                for r in ddgs.text(
-                    f"economic calendar important data release {today} CPI NFP FOMC GDP",
-                    max_results=4
-                ):
-                    snippet = _clean_search_text(r.get("body", ""))[:250]
-                    title = _clean_search_text(r.get("title", ""))
-                    results.append(f"• {title}: {snippet}")
-            return "\n".join(results) if results else "داده اقتصادی خاصی یافت نشد."
-        except Exception as e:
-            logger.warning(f"Economic calendar search failed: {e}")
-            return "جستجوی تقویم اقتصادی ناموفق."
-
-    return await loop.run_in_executor(None, _search)
-
-
-async def _call_groq(prompt: str) -> str:
-    """ارسال پرامپت به Groq API (رایگان، سریع، مدل Llama 3.1)."""
-    from openai import AsyncOpenAI
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError("متغیر محیطی GROQ_API_KEY تنظیم نشده. از console.groq.com کلید رایگان بگیر.")
-
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://api.groq.com/openai/v1",
-    )
-    response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=1600,
-    )
-    result = response.choices[0].message.content
-    return _clean_ai_output(result)
-
+# ─── تبدیل ویس به متن ────────────────────────────────────────────────────────
 
 async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> str:
     """تبدیل ویس به متن با Groq Whisper (رایگان)."""
@@ -183,6 +106,123 @@ async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> st
         return response.text.strip()
 
 
+# ─── فراخوانی Groq API ────────────────────────────────────────────────────────
+
+async def _call_groq(prompt: str) -> str:
+    """ارسال پرامپت به Groq LLaMA و دریافت پاسخ فارسی پاک."""
+    import httpx
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        logger.error("GROQ_API_KEY تنظیم نشده")
+        return "❌ خطا: کلید GROQ_API_KEY تنظیم نشده."
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1200,
+                    "temperature": 0.65,
+                },
+            )
+            response.raise_for_status()
+            result = response.json()["choices"][0]["message"]["content"]
+            return _clean_ai_output(result)
+    except Exception as e:
+        logger.error(f"خطا در فراخوانی Groq: {e}")
+        return f"❌ خطا در تولید تحلیل: {e}"
+
+
+# ─── داده‌های بازار ────────────────────────────────────────────────────────────
+
+async def _fetch_market_data(ticker: str) -> dict:
+    """دریافت داده‌های قیمتی از yfinance."""
+    try:
+        import yfinance as yf
+        loop = asyncio.get_event_loop()
+        hist = await loop.run_in_executor(
+            None, lambda: yf.Ticker(ticker).history(period="7d", interval="1d")
+        )
+        if hist.empty:
+            return {}
+
+        latest = hist.iloc[-1]
+        prev = hist.iloc[-2] if len(hist) > 1 else latest
+        price = round(float(latest["Close"]), 2)
+        prev_close = round(float(prev["Close"]), 2)
+        change = round(price - prev_close, 2)
+        change_pct = round((change / prev_close) * 100, 2) if prev_close else 0
+
+        recent = []
+        for idx, row in hist.tail(5).iterrows():
+            recent.append({"d": idx.strftime("%m/%d"), "c": round(float(row["Close"]), 2)})
+
+        return {
+            "price": price,
+            "change": change,
+            "change_pct": change_pct,
+            "high": round(float(latest["High"]), 2),
+            "low": round(float(latest["Low"]), 2),
+            "prev_close": prev_close,
+            "recent": recent,
+        }
+    except Exception as e:
+        logger.error(f"خطا در دریافت داده بازار {ticker}: {e}")
+        return {}
+
+
+# ─── جستجوی DuckDuckGo ────────────────────────────────────────────────────────
+
+async def _search_analyst_opinions(query: str) -> str:
+    """جستجوی دیدگاه تحلیلگران از وب (DuckDuckGo)."""
+    try:
+        from duckduckgo_search import DDGS
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: list(DDGS().text(query, max_results=5))
+        )
+        texts = []
+        for r in results:
+            title = _clean_search_text(r.get("title", ""))
+            body = _clean_search_text(r.get("body", ""))
+            combined = f"{title}: {body}".strip(": ")
+            if combined:
+                texts.append(f"- {combined}")
+        return "\n".join(texts) if texts else "اطلاعاتی از وب یافت نشد."
+    except Exception as e:
+        logger.error(f"خطا در جستجوی DuckDuckGo: {e}")
+        return "خطا در جستجوی وب."
+
+
+async def _search_economic_calendar(date: str) -> str:
+    """جستجوی رویدادهای اقتصادی امروز (DuckDuckGo)."""
+    try:
+        from duckduckgo_search import DDGS
+        query = f"economic calendar important events today {date} CPI NFP FOMC GDP interest rate"
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: list(DDGS().text(query, max_results=4))
+        )
+        texts = []
+        for r in results:
+            title = _clean_search_text(r.get("title", ""))
+            body = _clean_search_text(r.get("body", ""))
+            combined = f"{title}: {body}".strip(": ")
+            if combined:
+                texts.append(f"- {combined}")
+        return "\n".join(texts) if texts else "رویداد اقتصادی مهمی برای امروز یافت نشد."
+    except Exception as e:
+        logger.error(f"خطا در جستجوی تقویم اقتصادی: {e}")
+        return "خطا در جستجوی رویدادهای اقتصادی."
+
+
+# ─── تولید تحلیل ─────────────────────────────────────────────────────────────
 
 async def generate_analysis(asset_key: str) -> str:
     """تولید تحلیل روزانه برای یک دارایی."""
@@ -316,17 +356,19 @@ async def generate_analysis(asset_key: str) -> str:
     return await _call_groq(prompt)
 
 
+# ─── ویرایش تحلیل ────────────────────────────────────────────────────────────
+
 async def edit_analysis(original_text: str, edit_prompt: str, asset_key: str) -> str:
     """ویرایش تحلیل موجود بر اساس دستور ادمین."""
     asset = ASSETS[asset_key]
 
-    prompt = f"""تحلیل زیر برای {asset['fa_name']} نوشته شده:
+    prompt = f"""تحلیل زیر برای {asset['fa_name']} نوشته شده. فقط و فقط به فارسی بنویس:
 
 {original_text}
 
 ---
 دستور ویرایش از ادمین: {edit_prompt}
 
-تحلیل رو دقیقاً طبق دستور ویرایش کن. ساختار ۵ بخشی و فرمت فارسی رو حفظ کن."""
+تحلیل رو دقیقاً طبق دستور ویرایش کن. ساختار بخشی و فرمت فارسی رو حفظ کن. هیچ کلمه غیرفارسی اضافه نکن."""
 
     return await _call_groq(prompt)
