@@ -1,7 +1,11 @@
 flask
 gunicorn
-python-telegram-bot>=20.0
+python-telegram-bot[job-queue]>=20.0
 telethon
 aiohttp
 beautifulsoup4
 cloudscraper
+openai
+yfinance
+duckduckgo-search
+pytz

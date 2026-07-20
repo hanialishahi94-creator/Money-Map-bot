@@ -2281,6 +2281,197 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"خطا در ارسال هشدار قیمت به کاربر {alert['user_id']}: {e}")
 
 
+# ===== تحلیل روزانه AI =====
+
+async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
+    """جاب ساعت ۹ صبح — تولید و ارسال تحلیل AI به گروه ادمین."""
+    import ai_analyst
+    import pytz
+    TEHRAN_TZ = pytz.timezone("Asia/Tehran")
+    today = __import__("datetime").datetime.now(TEHRAN_TZ).strftime("%Y/%m/%d")
+
+    if "ai_pending" not in context.bot_data:
+        context.bot_data["ai_pending"] = {}
+    if "ai_edit_waiting" not in context.bot_data:
+        context.bot_data["ai_edit_waiting"] = {}
+
+    for asset_key, asset in ai_analyst.ASSETS.items():
+        try:
+            await context.bot.send_message(
+                chat_id=SUPPORT_GROUP_ID,
+                text=f"⏳ در حال تولید تحلیل {asset['emoji']} {asset['fa_name']}..."
+            )
+        except Exception:
+            pass
+
+        try:
+            text = await ai_analyst.generate_analysis(asset_key)
+        except Exception as e:
+            logger.error(f"AI analysis failed for {asset_key}: {e}")
+            try:
+                await context.bot.send_message(
+                    chat_id=SUPPORT_GROUP_ID,
+                    text=f"❌ خطا در تولید تحلیل {asset['fa_name']}:\n{e}"
+                )
+            except Exception:
+                pass
+            continue
+
+        caption = (
+            f"{asset['emoji']} تحلیل AI — {asset['fa_name']}\n"
+            f"📅 {today}\n\n"
+            f"{text}"
+        )
+        # تله‌گرام حداکثر ۴۰۹۶ کاراکتر — اگه طولانی‌تر شد، برش می‌زنیم
+        if len(caption) > 4090:
+            caption = caption[:4087] + "..."
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ تایید", callback_data=f"ai_approve:{asset_key}"),
+            InlineKeyboardButton("✏️ ویرایش", callback_data=f"ai_edit:{asset_key}"),
+        ]])
+
+        try:
+            msg = await context.bot.send_message(
+                chat_id=SUPPORT_GROUP_ID,
+                text=caption,
+                reply_markup=keyboard,
+            )
+            context.bot_data["ai_pending"][f"{asset_key}:{msg.message_id}"] = {
+                "asset": asset_key,
+                "text": text,
+                "date": today,
+                "msg_id": msg.message_id,
+            }
+        except Exception as e:
+            logger.error(f"Failed to send {asset_key} analysis to support group: {e}")
+
+        await asyncio.sleep(3)
+
+
+async def ai_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تایید تحلیل AI و ذخیره در دیتابیس."""
+    query = update.callback_query
+    await query.answer()
+
+    asset_key = query.data.split(":")[1]
+    msg_id = query.message.message_id
+    key = f"{asset_key}:{msg_id}"
+
+    pending = context.bot_data.get("ai_pending", {})
+    if key not in pending:
+        await query.answer("⚠️ تحلیل یافت نشد یا قبلاً پردازش شده!", show_alert=True)
+        return
+
+    data = pending.pop(key)
+    import ai_analyst
+    asset_name = ai_analyst.ASSETS[asset_key]["fa_name"]
+
+    db.set_analysis(asset_key, data["date"], data["text"])
+
+    try:
+        new_text = query.message.text + f"\n\n✅ تایید شد — {update.effective_user.first_name}"
+        await query.message.edit_text(new_text)
+    except Exception:
+        await query.message.reply_text(f"✅ تحلیل {asset_name} تایید و در بات ذخیره شد!")
+
+
+async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """درخواست ویرایش تحلیل AI."""
+    query = update.callback_query
+    await query.answer()
+
+    asset_key = query.data.split(":")[1]
+    msg_id = query.message.message_id
+    key = f"{asset_key}:{msg_id}"
+
+    pending = context.bot_data.get("ai_pending", {})
+    if key not in pending:
+        await query.answer("⚠️ تحلیل یافت نشد!", show_alert=True)
+        return
+
+    if "ai_edit_waiting" not in context.bot_data:
+        context.bot_data["ai_edit_waiting"] = {}
+
+    prompt_msg = await query.message.reply_text(
+        "✏️ پرامپت ویرایشت رو ریپلای کن روی همین پیام 👇\n\n"
+        "مثال: «کوتاه‌ترش کن» / «تکنیکالی‌تر باشه» / «لحن رسمی‌تر باشه»"
+    )
+
+    context.bot_data["ai_edit_waiting"][prompt_msg.message_id] = {
+        "pending_key": key,
+        "asset_key": asset_key,
+        "original_msg_id": msg_id,
+    }
+
+
+async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت پرامپت ویرایش از ادمین (ریپلای به پیام درخواست ویرایش)."""
+    msg = update.message
+    if not msg or msg.chat_id != SUPPORT_GROUP_ID:
+        return
+    if not msg.reply_to_message:
+        return
+
+    replied_id = msg.reply_to_message.message_id
+    waiting = context.bot_data.get("ai_edit_waiting", {})
+    if replied_id not in waiting:
+        return
+
+    edit_data = waiting.pop(replied_id)
+    asset_key = edit_data["asset_key"]
+    pending_key = edit_data["pending_key"]
+    original_msg_id = edit_data["original_msg_id"]
+    edit_prompt = msg.text or ""
+
+    pending = context.bot_data.get("ai_pending", {})
+    if pending_key not in pending:
+        await msg.reply_text("❌ تحلیل یافت نشد در حافظه!")
+        return
+
+    original_text = pending[pending_key]["text"]
+    today = pending[pending_key]["date"]
+
+    thinking = await msg.reply_text("⏳ در حال ویرایش با AI...")
+
+    try:
+        import ai_analyst
+        new_text = await ai_analyst.edit_analysis(original_text, edit_prompt, asset_key)
+        pending[pending_key]["text"] = new_text
+
+        asset = ai_analyst.ASSETS[asset_key]
+        new_caption = (
+            f"{asset['emoji']} تحلیل AI — {asset['fa_name']}\n"
+            f"📅 {today}\n\n"
+            f"{new_text}"
+        )
+        if len(new_caption) > 4090:
+            new_caption = new_caption[:4087] + "..."
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ تایید", callback_data=f"ai_approve:{asset_key}"),
+            InlineKeyboardButton("✏️ ویرایش", callback_data=f"ai_edit:{asset_key}"),
+        ]])
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=SUPPORT_GROUP_ID,
+                message_id=original_msg_id,
+                text=new_caption,
+                reply_markup=keyboard,
+            )
+        except Exception:
+            await msg.reply_text(new_caption, reply_markup=keyboard)
+
+        try:
+            await thinking.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        await thinking.edit_text(f"❌ خطا در ویرایش: {e}")
+
+
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
@@ -2375,9 +2566,26 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_vip))
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.PHOTO, handle_non_photo_while_waiting_receipt))
+    # AI Analysis handlers
+    app.add_handler(CallbackQueryHandler(ai_approve_callback, pattern=r"^ai_approve:"))
+    app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & filters.REPLY,
+        ai_edit_prompt_handler,
+    ))
+
     if app.job_queue is not None:
         app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
         app.job_queue.run_repeating(check_price_alerts, interval=300, first=60)
+        # تحلیل روزانه ساعت ۹ صبح به وقت تهران
+        import datetime as _dt
+        import pytz as _pytz
+        _tehran = _pytz.timezone("Asia/Tehran")
+        app.job_queue.run_daily(
+            daily_ai_analysis_job,
+            time=_dt.time(hour=9, minute=0, tzinfo=_tehran),
+            name="daily_ai_analysis",
+        )
     else:
         logger.warning("job_queue فعال نیست")
     logger.info("✅ ربات در حال اجراست...")
