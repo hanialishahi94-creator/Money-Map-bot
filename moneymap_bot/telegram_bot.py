@@ -674,11 +674,32 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return CHECK_MEMBERSHIP
 
     asset_map = {"gold": "🥇 طلا", "dollar": "💵 دلار", "bitcoin": "₿ بیتکوین"}
-    asset_name = asset_map[query.data]
-    analysis_text = _get_analysis_text(query.data)
+    asset_key  = query.data
+    asset_name = asset_map[asset_key]
+    analysis_text = _get_analysis_text(asset_key)
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
+
+    # ── ارسال چارت ICT/LIT ──────────────────────────────────────────────────
+    try:
+        import chart_generator
+        import io as _io
+        chart_bytes = await chart_generator.generate_chart_bytes_async(asset_key)
+        if chart_bytes:
+            caption_chart = (
+                f"📊 چارت {asset_name}  ·  1H  ·  ICT/LIT Order Block\n"
+                f"🟢 ناحیه حمایت  |  🔴 ناحیه مقاومت"
+            )
+            await query.message.reply_photo(
+                photo=_io.BytesIO(chart_bytes),
+                caption=caption_chart,
+            )
+    except Exception as _e:
+        logger.warning(f"chart_generator failed for {asset_key}: {_e}")
+
+    # ── ارسال متن تحلیل ─────────────────────────────────────────────────────
     await query.message.reply_text(
         f"📊 تحلیل {asset_name}\n{analysis_text}",
         reply_markup=keyboard,
