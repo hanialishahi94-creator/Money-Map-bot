@@ -2399,7 +2399,6 @@ async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         original_text = pending[key]["text"]
         today = pending[key]["date"]
     else:
-        # fallback: متن فعلی ذخیره‌شده در db
         row = db.get_analysis(asset_key)
         if not row or not row.get("text"):
             await query.answer("⚠️ تحلیل یافت نشد!", show_alert=True)
@@ -2412,13 +2411,23 @@ async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "مثال: «کوتاهترش کن» / «تکنیکالی‌تر باشه» / «لحن رسمی‌تر باشه»"
     )
 
-    # ذخیره در SQLite به جای bot_data (بعد از ری‌استارت هم باقی می‌مونه)
-    db.set_ai_edit_waiting(
-        prompt_msg_id=prompt_msg.message_id,
-        asset_key=asset_key,
-        original_text=original_text,
-        analysis_msg_id=msg_id,
-    )
+    edit_record = {
+        "asset_key": asset_key,
+        "original_text": original_text,
+        "analysis_msg_id": msg_id,
+    }
+    # ذخیره در bot_data (اولویت اول — همیشه کار می‌کنه)
+    context.bot_data.setdefault("ai_edit_waiting", {})[prompt_msg.message_id] = edit_record
+    # ذخیره در SQLite هم (برای بعد از ری‌استارت)
+    try:
+        db.set_ai_edit_waiting(
+            prompt_msg_id=prompt_msg.message_id,
+            asset_key=asset_key,
+            original_text=original_text,
+            analysis_msg_id=msg_id,
+        )
+    except Exception:
+        pass  # اگه db.py قدیمی باشه مشکلی نیست، bot_data کافیه
 
 
 async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2429,12 +2438,22 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     replied_id = msg.reply_to_message.message_id
 
-    # از SQLite بخون — اگه داده نبود یعنی این ریپلای مربوط به ویرایش AI نیست
-    edit_data = db.get_ai_edit_waiting(replied_id)
-    if not edit_data:
-        return
-
-    db.clear_ai_edit_waiting(replied_id)
+    # اول bot_data چک کن (سریع‌تر و مستقل از db)
+    waiting = context.bot_data.get("ai_edit_waiting", {})
+    if replied_id in waiting:
+        edit_data = waiting.pop(replied_id)
+    else:
+        # fallback: از SQLite بخون (برای بعد از ری‌استارت)
+        try:
+            edit_data = db.get_ai_edit_waiting(replied_id)
+        except Exception:
+            edit_data = None
+        if not edit_data:
+            return
+        try:
+            db.clear_ai_edit_waiting(replied_id)
+        except Exception:
+            pass
 
     asset_key = edit_data["asset_key"]
     original_text = edit_data["original_text"]
@@ -2486,6 +2505,7 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
             pass
 
     except Exception as e:
+        logger.exception("ai edit error")
         await thinking.edit_text(f"❌ خطا در ویرایش: {e}")
 
 
