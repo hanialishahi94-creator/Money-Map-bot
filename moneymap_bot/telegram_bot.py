@@ -701,7 +701,7 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
 
-    # ── چارت لحظه‌ای برای همه کاربران ─────────────────────────────────────
+    # ── چارت لحظه‌ای + تحلیل به عنوان کپشن ────────────────────────────────
     try:
         import chart_generator
         import io as _io
@@ -710,22 +710,35 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chart_bytes:
             fmt_map = {"bitcoin": ",.0f", "gold": ",.1f", "dollar": ",.3f"}
             fmt = fmt_map.get(asset_key, ",.2f")
-            chart_caption = f"📊 {asset_name}  ·  1H\n"
+            sr_line = ""
             if sup_mid is not None:
-                chart_caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
+                sr_line += f"🟢 حمایت: {sup_mid:{fmt}}  "
             if res_mid is not None:
-                chart_caption += f"🔴 مقاومت: {res_mid:{fmt}}"
+                sr_line += f"🔴 مقاومت: {res_mid:{fmt}}"
+            caption = f"📊 {asset_name}  ·  1H"
+            if sr_line:
+                caption += f"\n{sr_line}"
+            caption += f"\n\n{analysis_text}"
+            # کپشن تلگرام حداکثر ۱۰۲۴ کاراکتر دارد
+            if len(caption) > 1024:
+                caption = caption[:1021] + "..."
             await query.message.reply_photo(
                 photo=_io.BytesIO(chart_bytes),
-                caption=chart_caption.strip(),
+                caption=caption,
+                reply_markup=keyboard,
+            )
+        else:
+            # اگه چارت نشد، متن تنها ارسال بشه
+            await query.message.reply_text(
+                f"📊 تحلیل {asset_name}\n\n{analysis_text}",
+                reply_markup=keyboard,
             )
     except Exception as _e:
         logger.warning(f"chart in show_analysis failed for {asset_key}: {_e}")
-
-    await query.message.reply_text(
-        f"📊 تحلیل {asset_name}\n{analysis_text}",
-        reply_markup=keyboard,
-    )
+        await query.message.reply_text(
+            f"📊 تحلیل {asset_name}\n\n{analysis_text}",
+            reply_markup=keyboard,
+        )
     return MAIN_MENU
 
 
