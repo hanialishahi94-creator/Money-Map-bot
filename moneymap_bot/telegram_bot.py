@@ -2487,7 +2487,9 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
 async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     هر پیام فوروارد‌شده در گروه تایید محتوا → خودکار بازنویسی می‌شه.
-    تشخیص فوروارد هم با forward_origin (Bot API 7.0+) هم forward_date (قدیمی).
+    - پیام متنی  → فارسی می‌کنه و می‌فرسته
+    - عکس + کپشن → عکس رو نگه می‌داره، کپشن رو فارسی می‌کنه
+    - عکس بدون کپشن → همون عکس رو بدون تغییر می‌فرسته (تحلیل چارت)
     """
     if not CONTENT_GROUP_ID or update.effective_chat.id != CONTENT_GROUP_ID:
         return
@@ -2497,7 +2499,6 @@ async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     # ── تشخیص پیام فوروارد‌شده ──────────────────────────────────────────────
-    # Bot API 7.0+ از forward_origin استفاده می‌کنه؛ نسخه‌های قدیمی‌تر از forward_date
     is_forwarded = (
         getattr(msg, "forward_origin", None) is not None
         or getattr(msg, "forward_date", None) is not None
@@ -2505,11 +2506,29 @@ async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not is_forwarded:
         return  # پیام معمولی (تایپ ادمین) — نادیده بگیر
 
-    raw = msg.text or msg.caption
+    has_photo   = bool(msg.photo)
+    raw         = msg.text or msg.caption
+    photo_fid   = msg.photo[-1].file_id if has_photo else None
+
+    # عکس بدون کپشن → فوروارد خام بدون AI
+    if has_photo and not raw:
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ ارسال به VIP", callback_data="sig_approve"),
+            InlineKeyboardButton("❌ رد", callback_data="sig_reject"),
+        ]])
+        sent = await msg.reply_photo(photo=photo_fid, reply_markup=keyboard)
+        context.bot_data.setdefault("signal_pending", {})[sent.message_id] = {
+            "text": "",
+            "msg_id": sent.message_id,
+            "is_photo": True,
+            "photo_file_id": photo_fid,
+        }
+        return
+
     if not raw:
         return
 
-    thinking = await msg.reply_text("⏳ در حال بازنویسی سیگنال...")
+    thinking = await msg.reply_text("⏳ در حال پردازش...")
 
     try:
         import ai_analyst
@@ -2521,21 +2540,33 @@ async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE
             InlineKeyboardButton("❌ رد", callback_data="sig_reject"),
         ]])
 
-        sent = await msg.reply_text(
-            rewritten,
-            reply_markup=keyboard,
-        )
-
-        context.bot_data.setdefault("signal_pending", {})[sent.message_id] = {
-            "text": rewritten,
-            "msg_id": sent.message_id,
-        }
+        if has_photo:
+            # عکس + کپشن فارسی
+            sent = await msg.reply_photo(
+                photo=photo_fid,
+                caption=rewritten,
+                reply_markup=keyboard,
+            )
+            context.bot_data.setdefault("signal_pending", {})[sent.message_id] = {
+                "text": rewritten,
+                "msg_id": sent.message_id,
+                "is_photo": True,
+                "photo_file_id": photo_fid,
+            }
+        else:
+            # متن خالص
+            sent = await msg.reply_text(rewritten, reply_markup=keyboard)
+            context.bot_data.setdefault("signal_pending", {})[sent.message_id] = {
+                "text": rewritten,
+                "msg_id": sent.message_id,
+                "is_photo": False,
+            }
 
         await thinking.delete()
 
     except Exception as e:
         logger.exception("auto signal rewrite error")
-        await thinking.edit_text(f"❌ خطا در بازنویسی: {e}")
+        await thinking.edit_text(f"❌ خطا در پردازش: {e}")
 
 
 async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2613,13 +2644,29 @@ async def sig_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     try:
-        await context.bot.send_message(
-            chat_id=VIP_CHANNEL_ID,
-            text=f"📡 سیگنال\n\n{data['text']}",
-        )
-        await query.message.edit_text(
-            query.message.text + f"\n\n✅ ارسال شد به VIP — {update.effective_user.first_name}",
-        )
+        if data.get("is_photo") and data.get("photo_file_id"):
+            # ارسال عکس به VIP
+            await context.bot.send_photo(
+                chat_id=VIP_CHANNEL_ID,
+                photo=data["photo_file_id"],
+                caption=data["text"] or None,
+            )
+            # آپدیت کپشن پیام تایید
+            try:
+                await query.message.edit_caption(
+                    (query.message.caption or "") + f"\n\n✅ ارسال شد به VIP — {update.effective_user.first_name}",
+                )
+            except Exception:
+                pass
+        else:
+            # ارسال متن به VIP
+            await context.bot.send_message(
+                chat_id=VIP_CHANNEL_ID,
+                text=data["text"],
+            )
+            await query.message.edit_text(
+                query.message.text + f"\n\n✅ ارسال شد به VIP — {update.effective_user.first_name}",
+            )
     except Exception as e:
         await query.message.reply_text(f"❌ خطا در ارسال به VIP: {e}")
 
@@ -2630,7 +2677,12 @@ async def sig_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     context.bot_data.get("signal_pending", {}).pop(query.message.message_id, None)
     try:
-        await query.message.edit_text(query.message.text + "\n\n❌ رد شد.")
+        if query.message.photo:
+            await query.message.edit_caption(
+                (query.message.caption or "") + "\n\n❌ رد شد."
+            )
+        else:
+            await query.message.edit_text(query.message.text + "\n\n❌ رد شد.")
     except Exception:
         pass
 
@@ -2677,12 +2729,21 @@ async def sig_edit_text_handler(update: Update, context: ContextTypes.DEFAULT_TY
     ]])
 
     try:
-        await context.bot.edit_message_text(
-            chat_id=msg.chat_id,
-            message_id=msg_id,
-            text=f"📡 سیگنال (ویرایش شده):\n\n{new_text}",
-            reply_markup=keyboard,
-        )
+        is_photo = pending.get(msg_id, {}).get("is_photo", False)
+        if is_photo:
+            await context.bot.edit_message_caption(
+                chat_id=msg.chat_id,
+                message_id=msg_id,
+                caption=new_text,
+                reply_markup=keyboard,
+            )
+        else:
+            await context.bot.edit_message_text(
+                chat_id=msg.chat_id,
+                message_id=msg_id,
+                text=new_text,
+                reply_markup=keyboard,
+            )
         await msg.reply_text("✅ متن آپدیت شد.")
     except Exception as e:
         await msg.reply_text(f"❌ خطا: {e}")
@@ -3046,11 +3107,11 @@ def main():
         support_group_reply,
     ))
     # ===== سیستم سیگنال (گروه تایید محتوا) =====
-    # فوروارد خودکار: هر پیام متنی/کپشن‌دار در گروه تایید محتوا
+    # فوروارد خودکار: متن / عکس+کپشن / عکس بدون کپشن
     # (تشخیص فوروارد داخل تابع با forward_origin / forward_date انجام می‌شه)
     if CONTENT_GROUP_ID:
         app.add_handler(MessageHandler(
-            filters.Chat(CONTENT_GROUP_ID) & (filters.TEXT | filters.CAPTION),
+            filters.Chat(CONTENT_GROUP_ID) & (filters.TEXT | filters.CAPTION | filters.PHOTO),
             auto_signal_rewrite,
         ))
     app.add_handler(CommandHandler("signal", cmd_signal))
