@@ -555,5 +555,21 @@ def clear_ai_edit_waiting(prompt_msg_id: int):
         conn.execute("DELETE FROM settings WHERE key = ?", (f"ai_edit:{prompt_msg_id}",))
 
 
+# ---------- تاریخچه قیمت دلار (برای امتیاز فرصت) ----------
+
+def save_dollar_price(date: str, price_toman: float):
+    """ذخیره قیمت دلار برای یک روز خاص (برای محاسبه تغییر روزانه)."""
+    set_setting(f"dollar_price:{date}", str(price_toman))
+
+
+def get_dollar_price(date: str) -> float | None:
+    """دریافت قیمت ذخیره‌شده دلار برای یک روز خاص."""
+    val = get_setting(f"dollar_price:{date}")
+    try:
+        return float(val) if val is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 # هنگام import شدن، مطمئن شو جدول‌ها ساخته شده‌اند
 init_db()
