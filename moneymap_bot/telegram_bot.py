@@ -932,21 +932,40 @@ TARGET_CURRENCIES = set(CURRENCY_FA.keys())
 
 
 async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
-    import aiohttp
-    url = f"https://nfs.faireconomy.media/ff_calendar_{week}.json"
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                logger.info(f"FF status: {resp.status}")
-                if resp.status != 200:
-                    return None
-                data = await resp.json(content_type=None)
-                logger.info(f"FF count: {len(data)}, sample: {data[0] if data else None}")
-                return data
-    except Exception as e:
-        logger.error(f"خطا در دریافت تقویم: {e}")
-        return None
+    import aiohttp, time as _time
+    # cache-bust تا جدیدترین داده گرفته بشه
+    ts = int(_time.time())
+    urls = [
+        f"https://nfs.faireconomy.media/ff_calendar_{week}.json?t={ts}",
+        f"https://cdn-nfs.faireconomy.media/ff_calendar_{week}.json?t={ts}",
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cache-Control": "no-cache, no-store",
+        "Pragma": "no-cache",
+    }
+    for url in urls:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    logger.info(f"FF [{url}] status: {resp.status}")
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json(content_type=None)
+                    # لاگ برای debug: مقادیر actual رویدادهای منتشرشده
+                    from datetime import datetime, timezone
+                    now_utc = datetime.now(timezone.utc)
+                    for e in data:
+                        try:
+                            dt = datetime.fromisoformat(e.get("date","").replace("Z","+00:00"))
+                            if dt <= now_utc and e.get("impact","").lower() == "high":
+                                logger.info(f"FF past event actual={repr(e.get('actual'))} | {e.get('title','')[:40]}")
+                        except Exception:
+                            pass
+                    return data
+        except Exception as e:
+            logger.error(f"FF [{url}] error: {e}")
+    return None
 
 
 CURRENCY_PRIORITY = {c: i for i, c in enumerate(CURRENCY_FA.keys())}
