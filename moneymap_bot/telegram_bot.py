@@ -2484,6 +2484,50 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
 
 # ===== سیستم سیگنال =====
 
+async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    هر پیام فوروارد‌شده در گروه تایید محتوا → خودکار بازنویسی می‌شه.
+    """
+    if not CONTENT_GROUP_ID or update.effective_chat.id != CONTENT_GROUP_ID:
+        return
+
+    msg = update.message
+    if not msg:
+        return
+
+    raw = msg.text or msg.caption
+    if not raw:
+        return
+
+    thinking = await msg.reply_text("⏳ در حال بازنویسی سیگنال...")
+
+    try:
+        import ai_analyst
+        rewritten = await ai_analyst.rewrite_signal(raw)
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ ارسال به VIP", callback_data="sig_approve"),
+            InlineKeyboardButton("✏️ ویرایش", callback_data="sig_edit"),
+            InlineKeyboardButton("❌ رد", callback_data="sig_reject"),
+        ]])
+
+        sent = await msg.reply_text(
+            f"📡 سیگنال بازنویسی شد:\n\n{rewritten}",
+            reply_markup=keyboard,
+        )
+
+        context.bot_data.setdefault("signal_pending", {})[sent.message_id] = {
+            "text": rewritten,
+            "msg_id": sent.message_id,
+        }
+
+        await thinking.delete()
+
+    except Exception as e:
+        logger.exception("auto signal rewrite error")
+        await thinking.edit_text(f"❌ خطا در بازنویسی: {e}")
+
+
 async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /signal — ریرایت سیگنال و ارسال برای تایید ادمین.
@@ -2972,6 +3016,7 @@ def main():
     app.add_handler(CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"))
     app.add_handler(CommandHandler("approve", approve_vip))
     app.add_handler(CommandHandler("reject", reject_vip))
+    app.add_handler(CommandHandler("whereami", whereami_command))
     app.add_handler(MessageHandler(filters.Regex(r"^/approve_\d+$"), approve_vip))
     app.add_handler(MessageHandler(filters.Regex(r"^/reject_\d+$"), reject_vip))
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_vip_receipt_global))
@@ -2991,6 +3036,12 @@ def main():
         support_group_reply,
     ))
     # ===== سیستم سیگنال (گروه تایید محتوا) =====
+    # فوروارد خودکار: هر پیام فوروارد‌شده در گروه تایید محتوا بازنویسی می‌شه
+    if CONTENT_GROUP_ID:
+        app.add_handler(MessageHandler(
+            filters.Chat(CONTENT_GROUP_ID) & filters.FORWARDED,
+            auto_signal_rewrite,
+        ))
     app.add_handler(CommandHandler("signal", cmd_signal))
     app.add_handler(CallbackQueryHandler(sig_approve_callback, pattern="^sig_approve$"))
     app.add_handler(CallbackQueryHandler(sig_reject_callback, pattern="^sig_reject$"))
