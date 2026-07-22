@@ -203,6 +203,44 @@ async def _search_analyst_opinions(query: str) -> str:
         return "خطا در جستجوی وب."
 
 
+async def _fetch_sentiment(asset_key: str) -> str:
+    """دریافت سنتیمنت لحظه‌ای بازار."""
+    import httpx
+    result = {}
+
+    # ── کریپتو Fear & Greed (alternative.me) ────────────────────────────────
+    if asset_key == "bitcoin":
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get("https://api.alternative.me/fng/?limit=1")
+                r.raise_for_status()
+                data = r.json()["data"][0]
+                value = int(data["value"])
+                label = data["value_classification"]
+                result["crypto_fng"] = f"Crypto Fear & Greed: {value}/100 ({label})"
+        except Exception as e:
+            logger.warning(f"crypto fng error: {e}")
+
+    # ── CNN Fear & Greed (بازار کلی — برای دلار و طلا) ─────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.cnn.com/"},
+            )
+            r.raise_for_status()
+            score = r.json()["fear_and_greed"]["score"]
+            rating = r.json()["fear_and_greed"]["rating"]
+            result["cnn_fng"] = f"CNN Fear & Greed (بازار کلی): {score:.0f}/100 ({rating})"
+    except Exception as e:
+        logger.warning(f"CNN fng error: {e}")
+
+    if not result:
+        return "سنتیمنت در دسترس نیست."
+
+    return " | ".join(result.values())
+
+
 async def _search_economic_calendar(date: str) -> str:
     """جستجوی رویدادهای اقتصادی امروز (DuckDuckGo)."""
     try:
@@ -241,10 +279,10 @@ async def generate_analysis(
     asset = ASSETS[asset_key]
     today = datetime.datetime.now(TEHRAN_TZ).strftime("%Y/%m/%d")
 
-    market_data, analyst_info, econ_calendar = await asyncio.gather(
+    market_data, analyst_info, sentiment_data = await asyncio.gather(
         _fetch_market_data(asset["ticker"]),
         _search_analyst_opinions(asset["search_query"]),
-        _search_economic_calendar(today),
+        _fetch_sentiment(asset_key),
     )
 
     if market_data:
@@ -285,22 +323,26 @@ async def generate_analysis(
 دارایی: {asset_label}
 داده‌های قیمتی: {md_text}{sr_note}
 
-اطلاعات از وب (فقط اگه داده Positioning یا Funding Rate معتبر بود استفاده کن):
+سنتیمنت لحظه‌ای بازار:
+{sentiment_data}
+
+اطلاعات تکمیلی از وب:
 {analyst_info}
 
 ---
 
-یک پاراگراف کوتاه (حداکثر ۱۵۰ کلمه) بنویس. فقط فارسی.
+یک پاراگراف کوتاه (حداکثر ۱۵۰ کلمه) درباره {asset_label} بنویس. فقط فارسی.
 
-در این پاراگراف:
-۱. بگو بایاس کلی بازار چیست (صعودی / نزولی / رنج) و چرا — بر اساس ساختار قیمت، نه اخبار.
-۲. به اعداد حمایت و مقاومتی که در چارت مشخص شده اشاره کن و بگو اگر این سطوح حفظ یا شکسته شوند چه اتفاقی ممکن است بیفتد.
+محتوا:
+۱. سنتیمنت لحظه‌ای بازار چیست؟ ریسک‌پذیر است یا ریسک‌گریز؟ این موضوع چه تأثیری روی {asset_label} دارد؟
+۲. بایاس کلی: صعودی / نزولی / رنج — و دلیلش بر اساس ساختار قیمت.
+۳. به سطوح حمایت و مقاومت چارت اشاره کن — اگر این سطوح حفظ یا شکسته شوند چه اتفاقی ممکن است بیفتد.
 
 قوانین:
+- دارایی را با نام درست بنویس: {asset_label}. هیچ‌وقت اسم دارایی دیگری نیاور.
 - مثل یک تریدر باتجربه صحبت کن، نه مثل گزارش ربات.
-- از جملاتی مثل «بیتکوین فعلاً...»، «اگر این سطح شکسته بشه...»، «خریدارها هنوز...» استفاده کن.
 - هیچ بخش‌بندی، هدر یا لیست نزن. فقط یک پاراگراف روان.
-- از کلی‌گویی مثل «بازار در انتظار است» یا «احتمالاً خواهد رفت» استفاده نکن — اگه چیزی گفتی دلیلش رو بگو.
+- از کلی‌گویی مثل «بازار در انتظار است» یا «احتمالاً خواهد رفت» استفاده نکن.
 - اسم سبک‌های تحلیلی (ICT، LIT، Smart Money) نیاور.
 - اعداد رو به شکل محدوده بنویس، نه اعشار دقیق."""
 
