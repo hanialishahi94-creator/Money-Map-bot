@@ -2616,7 +2616,11 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
+        ],
+        allow_reentry=True,
         states={
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_PHONE: [
@@ -2664,9 +2668,13 @@ def main():
                 CallbackQueryHandler(alert_cancel, pattern="^alert_cancel$"),
             ],
             GOLD_CALC_OUNCE: [
+                CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
+                CallbackQueryHandler(back_to_menu, pattern="^menu$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_ounce),
             ],
             GOLD_CALC_DOLLAR: [
+                CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
+                CallbackQueryHandler(back_to_menu, pattern="^menu$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, gold_calc_get_dollar),
             ],
         },
