@@ -21,6 +21,7 @@ VIP_CARD_NUMBER = "6219-8610-1704-6631"
 VIP_CARD_OWNER = "هانیه علیشاهی"
 VIP_DAYS = 30  # مقدار پیش‌فرض — مقدار واقعی از طریق db.get_vip_days() و پنل ادمین قابل تغییر است
 VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
+CONTENT_GROUP_ID = int(os.getenv("CONTENT_GROUP_ID", "0"))  # آیدی گروه تایید محتوا (برای ارسال سیگنال)
 
 
 CAR_PRICE_LIST = [
@@ -2481,6 +2482,158 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"خطا در ارسال هشدار قیمت به کاربر {alert['user_id']}: {e}")
 
 
+# ===== سیستم سیگنال =====
+
+async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /signal — ریرایت سیگنال و ارسال برای تایید ادمین.
+    استفاده:
+      - روی یه پیام فوروارد‌شده Reply بزن و /signal بنویس
+      - یا /signal [متن سیگنال] مستقیم
+    فقط در گروه تایید محتوا کار می‌کنه.
+    """
+    if CONTENT_GROUP_ID and update.effective_chat.id != CONTENT_GROUP_ID:
+        return
+    if not CONTENT_GROUP_ID:
+        await update.message.reply_text("⚠️ متغیر CONTENT_GROUP_ID تنظیم نشده. آیدی این گروه رو در Railway ست کن.")
+        return
+
+    msg = update.message
+
+    # متن سیگنال خام
+    raw = None
+    if msg.reply_to_message:
+        # reply روی یه پیام فوروارد یا معمولی
+        raw = msg.reply_to_message.text or msg.reply_to_message.caption
+    if not raw:
+        # متن بعد از /signal
+        raw = " ".join(context.args) if context.args else None
+
+    if not raw:
+        await msg.reply_text(
+            "⚠️ متن سیگنال پیدا نشد.\n\n"
+            "روش استفاده:\n"
+            "۱. روی پیام سیگنال Reply بزن و /signal بنویس\n"
+            "۲. یا مستقیم: /signal [متن سیگنال]"
+        )
+        return
+
+    thinking = await msg.reply_text("⏳ در حال بازنویسی سیگنال...")
+
+    try:
+        import ai_analyst
+        rewritten = await ai_analyst.rewrite_signal(raw)
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ ارسال به VIP", callback_data="sig_approve"),
+            InlineKeyboardButton("✏️ ویرایش", callback_data="sig_edit"),
+            InlineKeyboardButton("❌ رد", callback_data="sig_reject"),
+        ]])
+
+        sent = await msg.reply_text(
+            f"📡 سیگنال بازنویسی شد:\n\n{rewritten}",
+            reply_markup=keyboard,
+        )
+
+        context.bot_data.setdefault("signal_pending", {})[sent.message_id] = {
+            "text": rewritten,
+            "msg_id": sent.message_id,
+        }
+
+        await thinking.delete()
+
+    except Exception as e:
+        logger.exception("signal rewrite error")
+        await thinking.edit_text(f"❌ خطا در بازنویسی: {e}")
+
+
+async def sig_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تایید و ارسال سیگنال به کانال VIP."""
+    query = update.callback_query
+    await query.answer()
+
+    pending = context.bot_data.get("signal_pending", {})
+    data = pending.pop(query.message.message_id, None)
+    if not data:
+        await query.answer("⚠️ سیگنال یافت نشد!", show_alert=True)
+        return
+
+    try:
+        await context.bot.send_message(
+            chat_id=VIP_CHANNEL_ID,
+            text=f"📡 سیگنال\n\n{data['text']}",
+        )
+        await query.message.edit_text(
+            query.message.text + f"\n\n✅ ارسال شد به VIP — {update.effective_user.first_name}",
+        )
+    except Exception as e:
+        await query.message.reply_text(f"❌ خطا در ارسال به VIP: {e}")
+
+
+async def sig_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """رد سیگنال."""
+    query = update.callback_query
+    await query.answer()
+    context.bot_data.get("signal_pending", {}).pop(query.message.message_id, None)
+    try:
+        await query.message.edit_text(query.message.text + "\n\n❌ رد شد.")
+    except Exception:
+        pass
+
+
+async def sig_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ورود به حالت ویرایش سیگنال."""
+    query = update.callback_query
+    await query.answer()
+
+    pending = context.bot_data.get("signal_pending", {})
+    msg_id = query.message.message_id
+    if msg_id not in pending:
+        await query.answer("⚠️ سیگنال یافت نشد!", show_alert=True)
+        return
+
+    context.bot_data.setdefault("signal_edit_mode", {})[query.message.chat_id] = {
+        "msg_id": msg_id,
+    }
+    await query.message.reply_text("✏️ متن جدید سیگنال رو بنویس:")
+
+
+async def sig_edit_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت متن ویرایش‌شده سیگنال."""
+    msg = update.message
+    if not msg or not msg.text:
+        return
+
+    edit_modes = context.bot_data.get("signal_edit_mode", {})
+    if msg.chat_id not in edit_modes:
+        return
+
+    edit_data = edit_modes.pop(msg.chat_id)
+    msg_id    = edit_data["msg_id"]
+    new_text  = msg.text
+
+    pending = context.bot_data.setdefault("signal_pending", {})
+    if msg_id in pending:
+        pending[msg_id]["text"] = new_text
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ ارسال به VIP", callback_data="sig_approve"),
+        InlineKeyboardButton("✏️ ویرایش", callback_data="sig_edit"),
+        InlineKeyboardButton("❌ رد", callback_data="sig_reject"),
+    ]])
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=msg.chat_id,
+            message_id=msg_id,
+            text=f"📡 سیگنال (ویرایش شده):\n\n{new_text}",
+            reply_markup=keyboard,
+        )
+        await msg.reply_text("✅ متن آپدیت شد.")
+    except Exception as e:
+        await msg.reply_text(f"❌ خطا: {e}")
+
+
 # ===== تحلیل روزانه AI =====
 
 async def cmd_trigger_ai_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2837,6 +2990,17 @@ def main():
         filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY & filters.TEXT,
         support_group_reply,
     ))
+    # ===== سیستم سیگنال (گروه تایید محتوا) =====
+    app.add_handler(CommandHandler("signal", cmd_signal))
+    app.add_handler(CallbackQueryHandler(sig_approve_callback, pattern="^sig_approve$"))
+    app.add_handler(CallbackQueryHandler(sig_reject_callback, pattern="^sig_reject$"))
+    app.add_handler(CallbackQueryHandler(sig_edit_callback, pattern="^sig_edit$"))
+    # handler ویرایش متن سیگنال — فقط اگه گروه تایید محتوا ست شده باشه
+    if CONTENT_GROUP_ID:
+        app.add_handler(MessageHandler(
+            filters.Chat(CONTENT_GROUP_ID) & filters.TEXT & ~filters.COMMAND,
+            sig_edit_text_handler,
+        ), group=-2)
 
     if app.job_queue is not None:
         app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
