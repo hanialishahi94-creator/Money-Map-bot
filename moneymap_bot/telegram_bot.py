@@ -938,12 +938,13 @@ _TV_COUNTRY_TO_CURRENCY = {
 }
 
 
-async def _fetch_tv_actuals(from_iso: str, to_iso: str) -> dict:
+async def _fetch_tv_actuals(from_iso: str, to_iso: str) -> list:
     """
-    دریافت مقادیر actual از TradingView Economic Calendar.
-    برمی‌گردونه dict به فرم {(currency, date_str, title_lower): actual_str}
+    دریافت رویدادهای دارای actual از TradingView Economic Calendar.
+    برمی‌گردونه list از dict با کلیدهای: currency, dt (datetime), actual
     """
     import aiohttp
+    from datetime import datetime, timezone
     url = "https://economic-calendar.tradingview.com/events"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -962,24 +963,28 @@ async def _fetch_tv_actuals(from_iso: str, to_iso: str) -> dict:
                              timeout=aiohttp.ClientTimeout(total=10)) as r:
                 logger.info(f"TV calendar status: {r.status}")
                 if r.status != 200:
-                    return {}
+                    return []
                 data = await r.json(content_type=None)
                 events = data.get("result", data) if isinstance(data, dict) else data
-                out = {}
+                out = []
                 for e in (events or []):
-                    actual = (e.get("actual") or e.get("actual_value") or "")
+                    actual = str(e.get("actual") or e.get("actual_value") or "").strip()
                     if not actual:
                         continue
                     country_code = e.get("country", "")
                     currency = _TV_COUNTRY_TO_CURRENCY.get(country_code, country_code)
-                    date_str = (e.get("date") or "")[:10]
-                    title = (e.get("title") or "").lower().strip()
-                    out[(currency, date_str, title)] = str(actual)
+                    date_raw = (e.get("date") or "").replace("Z", "+00:00")
+                    try:
+                        dt = datetime.fromisoformat(date_raw)
+                    except Exception:
+                        continue
+                    out.append({"currency": currency, "dt": dt, "actual": actual,
+                                "title": (e.get("title") or "").lower().strip()})
                 logger.info(f"TV actuals found: {len(out)}")
                 return out
     except Exception as e:
         logger.error(f"TV calendar error: {e}")
-        return {}
+        return []
 
 
 async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
@@ -1020,12 +1025,19 @@ async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
             if dt > now_utc:
                 continue  # رویداد آینده
             currency = e.get("country", "")
-            date_str = dt.strftime("%Y-%m-%d")
-            title = e.get("title", "").lower().strip()
-            key = (currency, date_str, title)
-            if key in tv_actuals:
-                e["actual"] = tv_actuals[key]
-                logger.info(f"TV actual filled: {tv_actuals[key]} | {e.get('title','')}")
+            # مطابقت بر اساس ارز + زمان (حداکثر ۹۰ دقیقه اختلاف)
+            best = None
+            best_delta = None
+            for tv in tv_actuals:
+                if tv["currency"] != currency:
+                    continue
+                delta = abs((dt - tv["dt"]).total_seconds())
+                if delta <= 5400 and (best_delta is None or delta < best_delta):
+                    best = tv
+                    best_delta = delta
+            if best:
+                e["actual"] = best["actual"]
+                logger.info(f"TV actual filled: {best['actual']} | {e.get('title','')} (Δ{best_delta:.0f}s)")
         except Exception:
             pass
 
