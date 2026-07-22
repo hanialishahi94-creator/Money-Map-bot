@@ -669,9 +669,9 @@ async def show_analysis_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🥇 تحلیل طلا", callback_data="gold")],
-        [InlineKeyboardButton("💵 تحلیل دلار", callback_data="dollar")],
-        [InlineKeyboardButton("₿ تحلیل بیتکوین", callback_data="bitcoin")],
+        [InlineKeyboardButton("🌐 اونس جهانی طلا", callback_data="gold")],
+        [InlineKeyboardButton("📊 شاخص دلار", callback_data="dollar")],
+        [InlineKeyboardButton("₿ بیتکوین", callback_data="bitcoin")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
@@ -692,7 +692,7 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_to_join_channel(update, context)
         return CHECK_MEMBERSHIP
 
-    asset_map = {"gold": "🥇 طلا", "dollar": "💵 دلار", "bitcoin": "₿ بیتکوین"}
+    asset_map = {"gold": "🌐 اونس جهانی طلا", "dollar": "📊 شاخص دلار", "bitcoin": "₿ بیتکوین"}
     asset_key  = query.data
     asset_name = asset_map[asset_key]
     analysis_text = _get_analysis_text(asset_key)
