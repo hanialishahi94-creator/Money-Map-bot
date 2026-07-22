@@ -111,7 +111,7 @@ async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> st
 
 # ─── فراخوانی Groq API ────────────────────────────────────────────────────────
 
-async def _call_groq(prompt: str) -> str:
+async def _call_groq(prompt: str, *, timeout: int = 90, max_retries: int = 4, base_delay: int = 15) -> str:
     """ارسال پرامپت به Groq LLaMA و دریافت پاسخ فارسی پاک — با retry خودکار برای 429."""
     import httpx
     api_key = os.getenv("GROQ_API_KEY")
@@ -119,12 +119,9 @@ async def _call_groq(prompt: str) -> str:
         logger.error("GROQ_API_KEY تنظیم نشده")
         return "❌ خطا: کلید GROQ_API_KEY تنظیم نشده."
 
-    max_retries = 4
-    base_delay = 15  # ثانیه — شروع انتظار بعد از 429
-
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=90) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={
@@ -140,7 +137,6 @@ async def _call_groq(prompt: str) -> str:
                 )
 
                 if response.status_code == 429:
-                    # از هدر Retry-After استفاده کن اگه موجود بود
                     retry_after = int(response.headers.get("retry-after", base_delay * (attempt + 1)))
                     logger.warning(f"Groq 429 — تلاش {attempt + 1}/{max_retries} — صبر {retry_after}s")
                     if attempt < max_retries - 1:
@@ -432,7 +428,8 @@ async def rewrite_signal(raw_signal: str) -> str:
 فقط متن رو به فارسی روان ترجمه کن — همون محتوا، همون مفهوم، بدون اضافه کردن چیزی.
 هیچ فرمت یا آیکون اضافه نکن مگه اینکه در متن اصلی بود."""
 
-    return await _call_groq(prompt)
+    # timeout=25: سریع، max_retries=1: اگه شلوغه فوری خطا بده نه ۶۰ ثانیه صبر کنه
+    return await _call_groq(prompt, timeout=25, max_retries=1, base_delay=3)
 
 
 # ─── ویرایش تحلیل ────────────────────────────────────────────────────────────
