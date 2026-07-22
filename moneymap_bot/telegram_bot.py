@@ -1035,11 +1035,15 @@ def format_event(e: dict) -> str:
     currency = e.get("country", "")
     currency_fa = CURRENCY_FA.get(currency, currency)
     title_en = e.get("title", "")
-    forecast = e.get("forecast", "") or "—"
-    previous = e.get("previous", "") or "—"
+    forecast_raw = e.get("forecast") or ""
+    previous_raw = e.get("previous") or ""
+    actual_raw   = e.get("actual")   or ""
+    forecast = forecast_raw.strip() or "—"
+    previous = previous_raw.strip() or "—"
+    actual   = actual_raw.strip()
+
     impact = e.get("impact", "").lower()
     impact_icon = "🔴" if impact == "high" else "🟠"
-    actual = e.get("actual", "") or ""
 
     date_raw = e.get("date", "")
     is_published = False
@@ -1053,14 +1057,37 @@ def format_event(e: dict) -> str:
         time_str = "—"
         day_str = "—"
 
-    status_line = f"✅ منتشر شد: {actual}\n" if (is_published and actual) else ""
+    # ساخت خط نتیجه
+    if is_published and actual:
+        # مقایسه actual vs forecast برای جهت تغییر
+        try:
+            a_val = float(actual.replace("%", "").replace("K", "").replace("M", "").strip())
+            f_val = float(forecast.replace("%", "").replace("K", "").replace("M", "").strip())
+            diff = a_val - f_val
+            if abs(diff) < 0.001:
+                vs = "= پیش‌بینی"
+            elif diff > 0:
+                vs = f"▲ بالاتر از پیش‌بینی ({diff:+.2f})"
+            else:
+                vs = f"▼ پایین‌تر از پیش‌بینی ({diff:+.2f})"
+        except Exception:
+            vs = ""
+
+        actual_line = f"✅ عدد منتشر شده: {actual}"
+        if vs:
+            actual_line += f"  {vs}"
+        actual_line += "\n"
+    elif is_published:
+        actual_line = "🔄 هنوز اعلام نشده\n"
+    else:
+        actual_line = ""
 
     explanation = get_data_explanation(title_en)
     return (
         f"{impact_icon} {currency_fa}\n"
         f"📌 {title_en}\n"
         f"📅 {day_str}  ⏰ {time_str} (تهران)\n"
-        f"{status_line}"
+        f"{actual_line}"
         f"🔮 پیش‌بینی: {forecast}  |  📊 قبلی: {previous}\n"
         f"ℹ️ {explanation}\n"
     )
