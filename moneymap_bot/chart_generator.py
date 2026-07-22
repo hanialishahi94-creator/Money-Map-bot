@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 # ─── تنظیمات دارایی‌ها ────────────────────────────────────────────────────────
 ASSET_CONFIG = {
-    "gold":    {"ticker": "GC=F",      "label": "XAU/USD · Gold · 1H",    "price_fmt": ",.1f"},
-    "bitcoin": {"ticker": "BTC-USD",   "label": "BTC/USD · Bitcoin · 1H", "price_fmt": ",.0f"},
-    "dollar":  {"ticker": "DX-Y.NYB",  "label": "DXY · Dollar Index · 1H","price_fmt": ",.3f"},
+    "gold":    {"ticker": "GC=F",      "label": "XAU/USD · Gold · 4H",    "price_fmt": ",.1f"},
+    "bitcoin": {"ticker": "BTC-USD",   "label": "BTC/USD · Bitcoin · 4H", "price_fmt": ",.0f"},
+    "dollar":  {"ticker": "DX-Y.NYB",  "label": "DXY · Dollar Index · 4H","price_fmt": ",.3f"},
 }
 
 # حداقل فاصله سطح از قیمت فعلی (درصد)
@@ -59,8 +59,8 @@ def find_swing_levels(df: pd.DataFrame, cur: float, asset_key: str):
     prominence   = max(cur * 0.004, price_range * 0.02)
 
     # ── Swing Highs → مقاومت ──
-    # distance=12: حداقل ۱۲ کندل (= ۱۲ ساعت) بین دو سقف
-    peaks, _ = find_peaks(highs, distance=12, prominence=prominence)
+    # distance=3: حداقل ۳ کندل (= ۱۲ ساعت روی ۴H) بین دو سقف
+    peaks, _ = find_peaks(highs, distance=3, prominence=prominence)
 
     res_level  = None
     best_res   = float("inf")
@@ -72,7 +72,7 @@ def find_swing_levels(df: pd.DataFrame, cur: float, asset_key: str):
             best_res  = dist
 
     # ── Swing Lows → حمایت ──
-    troughs, _ = find_peaks(-lows, distance=12, prominence=prominence)
+    troughs, _ = find_peaks(-lows, distance=3, prominence=prominence)
 
     sup_level  = None
     best_sup   = float("inf")
@@ -137,9 +137,9 @@ def generate_chart_bytes(asset_key: str):
     if not cfg:
         return None, None, None
 
-    # ─── دریافت ۳۰ روز داده ۱H (یه call) ───
+    # ─── دریافت ۶۰ روز داده ۴H (یه call) ───
     try:
-        hist_all = yf.Ticker(cfg["ticker"]).history(period="30d", interval="1h")
+        hist_all = yf.Ticker(cfg["ticker"]).history(period="60d", interval="4h")
         if hist_all.empty or len(hist_all) < 20:
             logger.error(f"No data for {asset_key}")
             return None, None, None
@@ -150,15 +150,15 @@ def generate_chart_bytes(asset_key: str):
 
     cur = float(hist_all["Close"].iloc[-1])
 
-    # ─── سطوح از کل ۳۰ روز ───
+    # ─── سطوح از کل ۶۰ روز ───
     try:
         sup_level, res_level = find_swing_levels(hist_all, cur, asset_key)
     except Exception as e:
         logger.error(f"Swing level error: {e}")
         sup_level, res_level = None, None
 
-    # ─── ۶۰ کندل آخر برای نمایش ───
-    hist = hist_all.tail(60).copy()
+    # ─── ۹۰ کندل آخر برای نمایش (≈ ۱۵ روز روی ۴H) ───
+    hist = hist_all.tail(90).copy()
     hist.reset_index(drop=True, inplace=True)
 
     n   = len(hist)

@@ -708,7 +708,7 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chart_bytes, sup_mid, res_mid = result if result else (None, None, None)
 
         fmt = ",.0f" if asset_key == "bitcoin" else (",.1f" if asset_key == "gold" else ",.3f")
-        caption = f"📊 {asset_name}  ·  1H\n"
+        caption = f"📊 {asset_name}  ·  4H\n"
         if sup_mid is not None:
             caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
         if res_mid is not None:
@@ -2516,7 +2516,7 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Chart generation failed for {asset_key}: {_ce}")
 
         fmt = ",.0f" if asset_key == "bitcoin" else (",.1f" if asset_key == "gold" else ",.3f")
-        caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  1H\n📅 {today}\n"
+        caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  4H\n📅 {today}\n"
         if sup_mid is not None:
             caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
         if res_mid is not None:
