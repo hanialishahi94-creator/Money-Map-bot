@@ -2522,7 +2522,7 @@ async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE
         ]])
 
         sent = await msg.reply_text(
-            f"📡 سیگنال بازنویسی شد:\n\n{rewritten}",
+            rewritten,
             reply_markup=keyboard,
         )
 
@@ -2585,7 +2585,7 @@ async def cmd_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]])
 
         sent = await msg.reply_text(
-            f"📡 سیگنال بازنویسی شد:\n\n{rewritten}",
+            rewritten,
             reply_markup=keyboard,
         )
 
