@@ -111,6 +111,55 @@ async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> st
 
 # ─── فراخوانی Groq API ────────────────────────────────────────────────────────
 
+async def _call_groq_signal(prompt: str) -> str:
+    """
+    فراخوانی سریع Groq برای بازنویسی سیگنال.
+    از مدل سبک llama-3.1-8b-instant استفاده می‌کنه (rate limit بالاتر، سریع‌تر).
+    """
+    import httpx
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return "❌ خطا: کلید GROQ_API_KEY تنظیم نشده."
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.1-8b-instant",   # سبک‌تر، rate limit بالاتر
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 600,
+                    "temperature": 0.4,
+                },
+            )
+            if response.status_code == 429:
+                # یه بار با مدل دیگه retry کن
+                await asyncio.sleep(3)
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gemma2-9b-it",       # fallback مدل
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 600,
+                        "temperature": 0.4,
+                    },
+                )
+            response.raise_for_status()
+            result = response.json()["choices"][0]["message"]["content"]
+            return _clean_ai_output(result)
+    except Exception as e:
+        logger.error(f"_call_groq_signal error: {e}")
+        return f"❌ خطا در پردازش: {e}"
+
+
 async def _call_groq(prompt: str, *, timeout: int = 90, max_retries: int = 4, base_delay: int = 15) -> str:
     """ارسال پرامپت به Groq LLaMA و دریافت پاسخ فارسی پاک — با retry خودکار برای 429."""
     import httpx
@@ -428,8 +477,8 @@ async def rewrite_signal(raw_signal: str) -> str:
 فقط متن رو به فارسی روان ترجمه کن — همون محتوا، همون مفهوم، بدون اضافه کردن چیزی.
 هیچ فرمت یا آیکون اضافه نکن مگه اینکه در متن اصلی بود."""
 
-    # timeout=25: سریع، max_retries=1: اگه شلوغه فوری خطا بده نه ۶۰ ثانیه صبر کنه
-    return await _call_groq(prompt, timeout=25, max_retries=1, base_delay=3)
+    # مدل سبک با rate limit بالاتر برای سیگنال — سریع‌تر و کمتر rate limit میخوره
+    return await _call_groq_signal(prompt)
 
 
 # ─── ویرایش تحلیل ────────────────────────────────────────────────────────────
