@@ -517,36 +517,52 @@ async def fetch_all_car_prices():
     current = {}
     lines   = []
 
+    def fmt_price(n):
+        if n >= 1_000_000_000:
+            return f"{n / 1_000_000_000:.2f}".rstrip('0').rstrip('.') + " میلیارد"
+        return f"{n // 1_000_000} میلیون"
+
     for name, price in results:
         if price is None:
-            lines.append(f"• {name}: خطا")
+            lines.append(f"◾️ {name}\n    ❌ خطا در دریافت")
             continue
         current[name] = price
         p_old = prev.get(name)
 
-        def fmt(n):
-            if n >= 1_000_000_000:
-                return f"{n / 1_000_000_000:.2f}".rstrip('0').rstrip('.') + " میلیارد تومان"
-            return f"{n // 1_000_000:,} میلیون تومان"
-
+        price_str = fmt_price(price)
         if p_old and p_old != price:
             diff = price - p_old
             pct  = diff / p_old * 100
-            sign = "↑" if diff > 0 else "↓"
-            lines.append(f"• {name}: {fmt(price)} {sign}{fmt(abs(diff))} ({pct:+.1f}%)")
+            change_emoji = "🔺" if diff > 0 else "🔻"
+            lines.append(f"◾️ {name}\n    💰 {price_str} تومان   {change_emoji} {pct:+.1f}%")
+        elif p_old and p_old == price:
+            lines.append(f"◾️ {name}\n    💰 {price_str} تومان   ➖ بدون تغییر")
         else:
-            lines.append(f"• {name}: {fmt(price)}")
+            lines.append(f"◾️ {name}\n    💰 {price_str} تومان")
 
     if current:
         db.save_car_prices(current)
 
+    sep = "┄" * 18
     # سایپا: 5 | ایران‌خودرو: 6 | چینی: 5
     s, i, c = lines[:5], lines[5:11], lines[11:]
     return "\n".join([
         "🚗 *قیمت صفر پرفروش‌ها*",
-        "🔵 *سایپا*", *s, "",
-        "🟡 *ایران‌خودرو*", *i, "",
-        "🔴 *چینی‌ها*", *c,
+        "",
+        sep,
+        "🔵 *سایپا*",
+        sep,
+        *s,
+        "",
+        sep,
+        "🟡 *ایران‌خودرو*",
+        sep,
+        *i,
+        "",
+        sep,
+        "🔴 *چینی‌ها*",
+        sep,
+        *c,
     ])
 
 
