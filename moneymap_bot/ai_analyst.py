@@ -221,22 +221,23 @@ async def _fetch_sentiment(asset_key: str) -> str:
         except Exception as e:
             logger.warning(f"crypto fng error: {e}")
 
-    # ── CNN Fear & Greed (بازار کلی — برای دلار و طلا) ─────────────────────
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(
-                "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
-                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.cnn.com/"},
-            )
-            r.raise_for_status()
-            score = r.json()["fear_and_greed"]["score"]
-            rating = r.json()["fear_and_greed"]["rating"]
-            result["cnn_fng"] = f"CNN Fear & Greed (بازار کلی): {score:.0f}/100 ({rating})"
-    except Exception as e:
-        logger.warning(f"CNN fng error: {e}")
+    # ── CNN Fear & Greed (بازار کلی — فقط برای بیتکوین و طلا) ──────────────
+    if asset_key != "dollar":
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+                    headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.cnn.com/"},
+                )
+                r.raise_for_status()
+                score = r.json()["fear_and_greed"]["score"]
+                rating = r.json()["fear_and_greed"]["rating"]
+                result["cnn_fng"] = f"CNN Fear & Greed (بازار کلی): {score:.0f}/100 ({rating})"
+        except Exception as e:
+            logger.warning(f"CNN fng error: {e}")
 
     if not result:
-        return "سنتیمنت در دسترس نیست."
+        return "N/A"
 
     return " | ".join(result.values())
 

@@ -92,10 +92,12 @@ def init_db():
             )
             """
         )
-        # migration: ستون image_path برای دیتابیس‌های قدیمی‌تر
+        # migration: ستون‌های اضافی برای دیتابیس‌های قدیمی‌تر
         existing_analysis_cols = {row["name"] for row in conn.execute("PRAGMA table_info(analyses)").fetchall()}
         if "image_path" not in existing_analysis_cols:
             conn.execute("ALTER TABLE analyses ADD COLUMN image_path TEXT")
+        if "chart_bytes" not in existing_analysis_cols:
+            conn.execute("ALTER TABLE analyses ADD COLUMN chart_bytes BLOB")
 
         conn.execute(
             """
@@ -353,33 +355,22 @@ def get_all_analyses():
         return {r["asset"]: dict(r) for r in rows}
 
 
-def set_analysis(asset: str, analysis_date: str, text: str, image_path: str = None):
+def set_analysis(asset: str, analysis_date: str, text: str,
+                 image_path: str = None, chart_bytes: bytes = None):
     with get_conn() as conn:
-        if image_path is not None:
-            conn.execute(
-                """
-                INSERT INTO analyses (asset, analysis_date, text, image_path, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(asset) DO UPDATE SET
-                    analysis_date = excluded.analysis_date,
-                    text = excluded.text,
-                    image_path = excluded.image_path,
-                    updated_at = excluded.updated_at
-                """,
-                (asset, analysis_date, text, image_path, time.time()),
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO analyses (asset, analysis_date, text, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(asset) DO UPDATE SET
-                    analysis_date = excluded.analysis_date,
-                    text = excluded.text,
-                    updated_at = excluded.updated_at
-                """,
-                (asset, analysis_date, text, time.time()),
-            )
+        conn.execute(
+            """
+            INSERT INTO analyses (asset, analysis_date, text, image_path, chart_bytes, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(asset) DO UPDATE SET
+                analysis_date = excluded.analysis_date,
+                text = excluded.text,
+                image_path = COALESCE(excluded.image_path, image_path),
+                chart_bytes = COALESCE(excluded.chart_bytes, chart_bytes),
+                updated_at = excluded.updated_at
+            """,
+            (asset, analysis_date, text, image_path, chart_bytes, time.time()),
+        )
 
 
 # ---------- تنظیمات (قیمت/مدت اشتراک VIP و ...) ----------

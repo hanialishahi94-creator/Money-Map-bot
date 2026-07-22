@@ -701,34 +701,32 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
 
-    # ── چارت لحظه‌ای + تحلیل به عنوان کپشن ────────────────────────────────
+    # ── چارت ذخیره‌شده + تحلیل با هم ──────────────────────────────────────
+    import io as _io
     try:
-        import chart_generator
-        import io as _io
-        result = await chart_generator.generate_chart_bytes_async(asset_key)
-        chart_bytes, sup_mid, res_mid = result if result else (None, None, None)
+        # اول چارت ذخیره‌شده در DB رو چک کن
+        stored = db.get_analysis(asset_key)
+        stored_chart = stored.get("chart_bytes") if stored else None
+
+        if stored_chart:
+            chart_bytes = stored_chart
+        else:
+            # اگه چارت ذخیره نشده، تازه تولید کن
+            import chart_generator
+            result = await chart_generator.generate_chart_bytes_async(asset_key)
+            chart_bytes = result[0] if result else None
+
+        caption = f"📊 {asset_name}  ·  1H\n\n{analysis_text}"
+        if len(caption) > 1024:
+            caption = caption[:1021] + "..."
+
         if chart_bytes:
-            fmt_map = {"bitcoin": ",.0f", "gold": ",.1f", "dollar": ",.3f"}
-            fmt = fmt_map.get(asset_key, ",.2f")
-            sr_line = ""
-            if sup_mid is not None:
-                sr_line += f"🟢 حمایت: {sup_mid:{fmt}}  "
-            if res_mid is not None:
-                sr_line += f"🔴 مقاومت: {res_mid:{fmt}}"
-            caption = f"📊 {asset_name}  ·  1H"
-            if sr_line:
-                caption += f"\n{sr_line}"
-            caption += f"\n\n{analysis_text}"
-            # کپشن تلگرام حداکثر ۱۰۲۴ کاراکتر دارد
-            if len(caption) > 1024:
-                caption = caption[:1021] + "..."
             await query.message.reply_photo(
                 photo=_io.BytesIO(chart_bytes),
                 caption=caption,
                 reply_markup=keyboard,
             )
         else:
-            # اگه چارت نشد، متن تنها ارسال بشه
             await query.message.reply_text(
                 f"📊 تحلیل {asset_name}\n\n{analysis_text}",
                 reply_markup=keyboard,
@@ -2600,6 +2598,7 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
                 "text": text,
                 "date": today,
                 "msg_id": msg.message_id,
+                "chart_bytes": chart_bytes,  # ذخیره چارت برای استفاده در approve
             }
         except Exception as e:
             logger.error(f"Failed to send {asset_key} analysis to support group: {e}")
@@ -2625,7 +2624,8 @@ async def ai_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     import ai_analyst
     asset_name = ai_analyst.ASSETS[asset_key]["fa_name"]
 
-    db.set_analysis(asset_key, data["date"], data["text"])
+    db.set_analysis(asset_key, data["date"], data["text"],
+                    chart_bytes=data.get("chart_bytes"))
 
     try:
         new_text = query.message.text + f"\n\n✅ تایید شد — {update.effective_user.first_name}"

@@ -100,13 +100,19 @@ def find_ict_order_blocks(df: pd.DataFrame):
                 })
 
     # ── انتخاب بهترین OB برای هر طرف ──
-    # اولویت: fresh (unmitigated) و نزدیک‌ترین به قیمت فعلی
+    # حداقل فاصله از قیمت: از OB‌های خیلی نزدیک صرف‌نظر می‌کنیم
+    min_dist_pct = 0.005   # حداقل ۰.۵٪ فاصله از قیمت فعلی
+    min_dist = cur * min_dist_pct
+
     def best_ob(candidates):
         if not candidates:
             return None
-        fresh = [c for c in candidates if c["fresh"]]
-        pool  = fresh if fresh else candidates
-        return min(pool, key=lambda c: c["dist"])
+        # فقط OB‌هایی که حداقل فاصله کافی از قیمت دارند
+        far_enough = [c for c in candidates if c["dist"] >= min_dist]
+        pool = far_enough if far_enough else candidates  # اگه همه نزدیک بودن، از همه انتخاب کن
+        fresh = [c for c in pool if c["fresh"]]
+        best_pool = fresh if fresh else pool
+        return min(best_pool, key=lambda c: c["dist"])
 
     support    = best_ob(candidates_bull)
     resistance = best_ob(candidates_bear)
