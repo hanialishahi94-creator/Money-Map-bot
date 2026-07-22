@@ -2487,6 +2487,7 @@ async def check_price_alerts(context: ContextTypes.DEFAULT_TYPE):
 async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     هر پیام فوروارد‌شده در گروه تایید محتوا → خودکار بازنویسی می‌شه.
+    تشخیص فوروارد هم با forward_origin (Bot API 7.0+) هم forward_date (قدیمی).
     """
     if not CONTENT_GROUP_ID or update.effective_chat.id != CONTENT_GROUP_ID:
         return
@@ -2494,6 +2495,15 @@ async def auto_signal_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = update.message
     if not msg:
         return
+
+    # ── تشخیص پیام فوروارد‌شده ──────────────────────────────────────────────
+    # Bot API 7.0+ از forward_origin استفاده می‌کنه؛ نسخه‌های قدیمی‌تر از forward_date
+    is_forwarded = (
+        getattr(msg, "forward_origin", None) is not None
+        or getattr(msg, "forward_date", None) is not None
+    )
+    if not is_forwarded:
+        return  # پیام معمولی (تایپ ادمین) — نادیده بگیر
 
     raw = msg.text or msg.caption
     if not raw:
@@ -3036,10 +3046,11 @@ def main():
         support_group_reply,
     ))
     # ===== سیستم سیگنال (گروه تایید محتوا) =====
-    # فوروارد خودکار: هر پیام فوروارد‌شده در گروه تایید محتوا بازنویسی می‌شه
+    # فوروارد خودکار: هر پیام متنی/کپشن‌دار در گروه تایید محتوا
+    # (تشخیص فوروارد داخل تابع با forward_origin / forward_date انجام می‌شه)
     if CONTENT_GROUP_ID:
         app.add_handler(MessageHandler(
-            filters.Chat(CONTENT_GROUP_ID) & filters.FORWARDED,
+            filters.Chat(CONTENT_GROUP_ID) & (filters.TEXT | filters.CAPTION),
             auto_signal_rewrite,
         ))
     app.add_handler(CommandHandler("signal", cmd_signal))
