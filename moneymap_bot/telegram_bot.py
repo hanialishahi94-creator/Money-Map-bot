@@ -931,41 +931,105 @@ CURRENCY_FA = {
 TARGET_CURRENCIES = set(CURRENCY_FA.keys())
 
 
-async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
-    import aiohttp, time as _time
-    # cache-bust تا جدیدترین داده گرفته بشه
-    ts = int(_time.time())
-    urls = [
-        f"https://nfs.faireconomy.media/ff_calendar_{week}.json?t={ts}",
-        f"https://cdn-nfs.faireconomy.media/ff_calendar_{week}.json?t={ts}",
-    ]
+# نگاشت کد کشور TradingView → کد ارز ForexFactory
+_TV_COUNTRY_TO_CURRENCY = {
+    "US": "USD", "EU": "EUR", "GB": "GBP",
+    "AU": "AUD", "NZ": "NZD", "JP": "JPY", "CA": "CAD",
+}
+
+
+async def _fetch_tv_actuals(from_iso: str, to_iso: str) -> dict:
+    """
+    دریافت مقادیر actual از TradingView Economic Calendar.
+    برمی‌گردونه dict به فرم {(currency, date_str, title_lower): actual_str}
+    """
+    import aiohttp
+    url = "https://economic-calendar.tradingview.com/events"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cache-Control": "no-cache, no-store",
-        "Pragma": "no-cache",
+        "Accept": "application/json, */*",
+        "Origin": "https://www.tradingview.com",
+        "Referer": "https://www.tradingview.com/economic-calendar/",
     }
-    for url in urls:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    logger.info(f"FF [{url}] status: {resp.status}")
-                    if resp.status != 200:
+    params = {
+        "from": from_iso,
+        "to": to_iso,
+        "countries": "US,EU,GB,AU,NZ,JP,CA",
+    }
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, params=params, headers=headers,
+                             timeout=aiohttp.ClientTimeout(total=10)) as r:
+                logger.info(f"TV calendar status: {r.status}")
+                if r.status != 200:
+                    return {}
+                data = await r.json(content_type=None)
+                events = data.get("result", data) if isinstance(data, dict) else data
+                out = {}
+                for e in (events or []):
+                    actual = (e.get("actual") or e.get("actual_value") or "")
+                    if not actual:
                         continue
+                    country_code = e.get("country", "")
+                    currency = _TV_COUNTRY_TO_CURRENCY.get(country_code, country_code)
+                    date_str = (e.get("date") or "")[:10]
+                    title = (e.get("title") or "").lower().strip()
+                    out[(currency, date_str, title)] = str(actual)
+                logger.info(f"TV actuals found: {len(out)}")
+                return out
+    except Exception as e:
+        logger.error(f"TV calendar error: {e}")
+        return {}
+
+
+async def fetch_ff_calendar(week: str = "thisweek") -> list | None:
+    import aiohttp, time as _time
+    from datetime import datetime, timezone, timedelta
+
+    ts = int(_time.time())
+    url = f"https://nfs.faireconomy.media/ff_calendar_{week}.json?t={ts}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cache-Control": "no-cache",
+    }
+    data = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                logger.info(f"FF status: {resp.status}")
+                if resp.status == 200:
                     data = await resp.json(content_type=None)
-                    # لاگ برای debug: مقادیر actual رویدادهای منتشرشده
-                    from datetime import datetime, timezone
-                    now_utc = datetime.now(timezone.utc)
-                    for e in data:
-                        try:
-                            dt = datetime.fromisoformat(e.get("date","").replace("Z","+00:00"))
-                            if dt <= now_utc and e.get("impact","").lower() == "high":
-                                logger.info(f"FF past event actual={repr(e.get('actual'))} | {e.get('title','')[:40]}")
-                        except Exception:
-                            pass
-                    return data
-        except Exception as e:
-            logger.error(f"FF [{url}] error: {e}")
-    return None
+    except Exception as e:
+        logger.error(f"FF error: {e}")
+
+    if not data:
+        return None
+
+    # تلاش برای پر کردن actual از TradingView
+    now_utc = datetime.now(timezone.utc)
+    # بازه زمانی: ۷ روز گذشته تا فردا
+    from_iso = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00.000Z")
+    to_iso   = (now_utc + timedelta(days=1)).strftime("%Y-%m-%dT23:59:59.000Z")
+    tv_actuals = await _fetch_tv_actuals(from_iso, to_iso)
+
+    for e in data:
+        if e.get("actual"):
+            continue  # قبلاً داشته
+        try:
+            dt = datetime.fromisoformat(e.get("date", "").replace("Z", "+00:00"))
+            if dt > now_utc:
+                continue  # رویداد آینده
+            currency = e.get("country", "")
+            date_str = dt.strftime("%Y-%m-%d")
+            title = e.get("title", "").lower().strip()
+            key = (currency, date_str, title)
+            if key in tv_actuals:
+                e["actual"] = tv_actuals[key]
+                logger.info(f"TV actual filled: {tv_actuals[key]} | {e.get('title','')}")
+        except Exception:
+            pass
+
+    return data
 
 
 CURRENCY_PRIORITY = {c: i for i, c in enumerate(CURRENCY_FA.keys())}
