@@ -695,39 +695,40 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asset_map = {"gold": "🌐 اونس جهانی طلا", "dollar": "📊 شاخص دلار", "bitcoin": "₿ بیتکوین"}
     asset_key  = query.data
     asset_name = asset_map[asset_key]
-    analysis_text = _get_analysis_text(asset_key)
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
 
-    # ── چارت همیشه fresh + تحلیل با هم ────────────────────────────────────
+    # ── چارت fresh با سطوح حمایت/مقاومت ───────────────────────────────────
     import io as _io
+    import chart_generator
     try:
-        # هر بار چارت رو تازه تولید کن (قیمت و سطوح به‌روز باشن)
-        import chart_generator
         result = await chart_generator.generate_chart_bytes_async(asset_key)
-        chart_bytes = result[0] if result else None
+        chart_bytes, sup_mid, res_mid = result if result else (None, None, None)
 
-        caption = f"📊 {asset_name}  ·  1H\n\n{analysis_text}"
-        if len(caption) > 1024:
-            caption = caption[:1021] + "..."
+        fmt = ",.0f" if asset_key == "bitcoin" else (",.1f" if asset_key == "gold" else ",.3f")
+        caption = f"📊 {asset_name}  ·  1H\n"
+        if sup_mid is not None:
+            caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
+        if res_mid is not None:
+            caption += f"🔴 مقاومت: {res_mid:{fmt}}"
 
         if chart_bytes:
             await query.message.reply_photo(
                 photo=_io.BytesIO(chart_bytes),
-                caption=caption,
+                caption=caption.strip(),
                 reply_markup=keyboard,
             )
         else:
             await query.message.reply_text(
-                f"📊 تحلیل {asset_name}\n\n{analysis_text}",
+                f"📊 {asset_name}\n\n⚠️ چارت در دسترس نیست.",
                 reply_markup=keyboard,
             )
     except Exception as _e:
         logger.warning(f"chart in show_analysis failed for {asset_key}: {_e}")
         await query.message.reply_text(
-            f"📊 تحلیل {asset_name}\n\n{analysis_text}",
+            f"📊 {asset_name}\n\n⚠️ خطا در دریافت چارت.",
             reply_markup=keyboard,
         )
     return MAIN_MENU
@@ -2491,7 +2492,7 @@ async def cmd_trigger_ai_analysis(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
-    """جاب ساعت ۹ صبح — تولید و ارسال تحلیل AI به گروه ادمین."""
+    """جاب ساعت ۹ صبح — تولید چارت با سطوح S/R و ارسال به گروه ادمین برای تایید."""
     import ai_analyst
     import pytz
     TEHRAN_TZ = pytz.timezone("Asia/Tehran")
@@ -2499,22 +2500,12 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
 
     if "ai_pending" not in context.bot_data:
         context.bot_data["ai_pending"] = {}
-    if "ai_edit_waiting" not in context.bot_data:
-        context.bot_data["ai_edit_waiting"] = {}
 
     import chart_generator
     import io as _io
 
     for asset_key, asset in ai_analyst.ASSETS.items():
-        try:
-            await context.bot.send_message(
-                chat_id=SUPPORT_GROUP_ID,
-                text=f"⏳ در حال تولید تحلیل {asset['emoji']} {asset['fa_name']}..."
-            )
-        except Exception:
-            pass
-
-        # ── ۱. اول چارت رو بگیر تا S/R levels دستمون باشه ──────────────────
+        # ── تولید چارت با سطوح حمایت/مقاومت ───────────────────────────────
         chart_bytes = None
         sup_mid = None
         res_mid = None
@@ -2524,79 +2515,46 @@ async def daily_ai_analysis_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as _ce:
             logger.warning(f"Chart generation failed for {asset_key}: {_ce}")
 
-        # ── ۲. تحلیل AI رو با S/R levels تولید کن ───────────────────────────
-        try:
-            text = await ai_analyst.generate_analysis(
-                asset_key,
-                support_level=sup_mid,
-                resistance_level=res_mid,
-            )
-        except Exception as e:
-            logger.error(f"AI analysis failed for {asset_key}: {e}")
-            try:
-                await context.bot.send_message(
-                    chat_id=SUPPORT_GROUP_ID,
-                    text=f"❌ خطا در تولید تحلیل {asset['fa_name']}:\n{e}"
-                )
-            except Exception:
-                pass
-            continue
-
-        caption = (
-            f"{asset['emoji']} {asset['fa_name']}\n"
-            f"📅 {today}\n\n"
-            f"{text}"
-        )
-        # تله‌گرام حداکثر ۴۰۹۶ کاراکتر — اگه طولانی‌تر شد، برش می‌زنیم
-        if len(caption) > 4090:
-            caption = caption[:4087] + "..."
+        fmt = ",.0f" if asset_key == "bitcoin" else (",.1f" if asset_key == "gold" else ",.3f")
+        caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  1H\n📅 {today}\n"
+        if sup_mid is not None:
+            caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
+        if res_mid is not None:
+            caption += f"🔴 مقاومت: {res_mid:{fmt}}"
 
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ تایید", callback_data=f"ai_approve:{asset_key}"),
-            InlineKeyboardButton("✏️ ویرایش", callback_data=f"ai_edit:{asset_key}"),
         ]])
 
-        # ── ۳. ارسال چارت با کپشن S/R همخوان با متن تحلیل ─────────────────
+        # ── ارسال چارت به گروه ادمین با دکمه تایید ─────────────────────────
         if chart_bytes:
             try:
-                fmt = ",.2f"  # فرمت پیش‌فرض
-                if asset_key == "bitcoin":
-                    fmt = ",.0f"
-                elif asset_key == "gold":
-                    fmt = ",.1f"
-
-                chart_caption = f"📊 {asset['emoji']} {asset['fa_name']}  ·  1H\n"
-                if sup_mid is not None:
-                    chart_caption += f"🟢 حمایت: {sup_mid:{fmt}}  "
-                if res_mid is not None:
-                    chart_caption += f"🔴 مقاومت: {res_mid:{fmt}}"
-
-                await context.bot.send_photo(
+                msg = await context.bot.send_photo(
                     chat_id=SUPPORT_GROUP_ID,
                     photo=_io.BytesIO(chart_bytes),
-                    caption=chart_caption.strip(),
+                    caption=caption.strip(),
+                    reply_markup=keyboard,
                 )
-            except Exception as _ce:
-                logger.warning(f"Failed to send chart for {asset_key}: {_ce}")
+                context.bot_data["ai_pending"][f"{asset_key}:{msg.message_id}"] = {
+                    "asset": asset_key,
+                    "date": today,
+                    "msg_id": msg.message_id,
+                    "chart_bytes": chart_bytes,
+                    "sup_mid": sup_mid,
+                    "res_mid": res_mid,
+                }
+            except Exception as e:
+                logger.error(f"Failed to send chart for {asset_key}: {e}")
+        else:
+            try:
+                await context.bot.send_message(
+                    chat_id=SUPPORT_GROUP_ID,
+                    text=f"❌ خطا در تولید چارت {asset['fa_name']}",
+                )
+            except Exception:
+                pass
 
-        # ── ۴. ارسال متن تحلیل با دکمه‌های تایید/ویرایش ─────────────────────
-        try:
-            msg = await context.bot.send_message(
-                chat_id=SUPPORT_GROUP_ID,
-                text=caption,
-                reply_markup=keyboard,
-            )
-            context.bot_data["ai_pending"][f"{asset_key}:{msg.message_id}"] = {
-                "asset": asset_key,
-                "text": text,
-                "date": today,
-                "msg_id": msg.message_id,
-                "chart_bytes": chart_bytes,  # ذخیره چارت برای استفاده در approve
-            }
-        except Exception as e:
-            logger.error(f"Failed to send {asset_key} analysis to support group: {e}")
-
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
 
 
 async def ai_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2617,14 +2575,14 @@ async def ai_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     import ai_analyst
     asset_name = ai_analyst.ASSETS[asset_key]["fa_name"]
 
-    db.set_analysis(asset_key, data["date"], data["text"],
+    db.set_analysis(asset_key, data["date"], text="",
                     chart_bytes=data.get("chart_bytes"))
 
     try:
-        new_text = query.message.text + f"\n\n✅ تایید شد — {update.effective_user.first_name}"
-        await query.message.edit_text(new_text)
+        new_caption = query.message.caption + f"\n\n✅ تایید شد — {update.effective_user.first_name}"
+        await query.message.edit_caption(new_caption)
     except Exception:
-        await query.message.reply_text(f"✅ تحلیل {asset_name} تایید و در بات ذخیره شد!")
+        await query.message.reply_text(f"✅ چارت {asset_name} تایید و ذخیره شد!")
 
 
 async def ai_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
