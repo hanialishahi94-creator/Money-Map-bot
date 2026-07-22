@@ -1,5 +1,6 @@
 """
-chart_generator.py — چارت کندل‌استیک ۱H با سطوح حمایت/مقاومت از Daily Swing High/Low
+chart_generator.py — چارت کندل‌استیک ۱H
+سطوح حمایت/مقاومت از Swing High/Low روی ۳۰ روز داده ۱H
 """
 import io
 import logging
@@ -15,11 +16,11 @@ ASSET_CONFIG = {
     "dollar":  {"ticker": "DX-Y.NYB",  "label": "DXY · Dollar Index · 1H","price_fmt": ",.3f"},
 }
 
-# حداقل فاصله سطح از قیمت فعلی (درصد) — برای فیلتر سطوح خیلی نزدیک
+# حداقل فاصله سطح از قیمت فعلی (درصد)
 MIN_DIST_PCT = {
-    "bitcoin": 0.02,   # ۲٪ برای بیتکوین (نوسان بالا)
-    "gold":    0.008,  # ۰.۸٪ برای طلا
-    "dollar":  0.003,  # ۰.۳٪ برای دلار ایندکس
+    "bitcoin": 0.025,  # ۲.۵٪
+    "gold":    0.010,  # ۱٪
+    "dollar":  0.004,  # ۰.۴٪
 }
 
 # ─── رنگ‌های تم (TradingView Dark) ───────────────────────────────────────────
@@ -30,89 +31,75 @@ TEXT    = "#d1d4dc"
 BORDER  = "#363c4e"
 UP      = "#26a69a"
 DOWN    = "#ef5350"
-SUP_CLR = "#00e676"   # سبز حمایت
-RES_CLR = "#ff1744"   # قرمز مقاومت
-CUR_CLR = "#ffeb3b"   # زرد قیمت فعلی
+SUP_CLR = "#00e676"
+RES_CLR = "#ff1744"
+CUR_CLR = "#ffeb3b"
 
 
-# ─── پیدا کردن سطوح کلیدی از Daily Swing High/Low ───────────────────────────
+# ─── پیدا کردن سطوح Swing از داده ۱H (بازه بلندتر) ─────────────────────────
 
-def find_key_levels(ticker: str, cur: float, asset_key: str) -> tuple:
+def find_swing_levels(df: pd.DataFrame, cur: float, asset_key: str):
     """
-    سطوح حمایت و مقاومت رو از داده‌های Daily (۹۰ روز) پیدا می‌کنه.
-    از Swing High/Low با حداقل فاصله معنادار از قیمت فعلی استفاده می‌کنه.
+    سطوح حمایت و مقاومت رو از Swing High/Low پیدا می‌کنه.
+    df باید ۳۰ روز داده ۱H باشه تا سطوح معنادار و بازتر باشن.
 
-    برمی‌گردونه: (support_dict, resistance_dict)
-    هر dict داره: {"level": float, "low": float, "high": float}
+    برمی‌گردونه: (support_level, resistance_level) — هر کدوم float یا None
     """
-    import yfinance as yf
     from scipy.signal import find_peaks
 
+    highs = df["High"].values
+    lows  = df["Low"].values
+    n     = len(df)
+
     min_dist_pct = MIN_DIST_PCT.get(asset_key, 0.01)
-    min_dist = cur * min_dist_pct
+    min_dist     = cur * min_dist_pct
 
-    try:
-        daily = yf.Ticker(ticker).history(period="90d", interval="1d")
-        if daily.empty or len(daily) < 10:
-            return None, None
-    except Exception:
-        return None, None
+    # prominence: حداقل چقدر از اطراف بزرگ‌تر/کوچک‌تر باشه
+    price_range  = highs.max() - lows.min()
+    prominence   = max(cur * 0.004, price_range * 0.02)
 
-    highs = daily["High"].values
-    lows  = daily["Low"].values
-    n     = len(daily)
+    # ── Swing Highs → مقاومت ──
+    # distance=12: حداقل ۱۲ کندل (= ۱۲ ساعت) بین دو سقف
+    peaks, _ = find_peaks(highs, distance=12, prominence=prominence)
 
-    # ── Swing Highs (مقاومت) ──
-    # پیک‌هایی که از هر دو طرف بالاترند (حداقل ۳ روز فاصله)
-    prominence_thresh = (highs.max() - lows.min()) * 0.008
-    peaks, props = find_peaks(highs, distance=3, prominence=prominence_thresh)
-
-    resistance = None
-    best_res_dist = float("inf")
+    res_level  = None
+    best_res   = float("inf")
     for idx in peaks:
-        level = highs[idx]
-        dist = level - cur
-        if dist >= min_dist and dist < best_res_dist:
-            # ناحیه: از low کندل تا high کندل
-            body_lo = min(daily["Open"].iloc[idx], daily["Close"].iloc[idx])
-            resistance = {
-                "level": level,
-                "low":   body_lo,
-                "high":  level,
-                "dist":  dist,
-            }
-            best_res_dist = dist
+        lv   = highs[idx]
+        dist = lv - cur
+        if dist >= min_dist and dist < best_res:
+            res_level = lv
+            best_res  = dist
 
-    # ── Swing Lows (حمایت) ──
-    troughs, _ = find_peaks(-lows, distance=3, prominence=prominence_thresh)
+    # ── Swing Lows → حمایت ──
+    troughs, _ = find_peaks(-lows, distance=12, prominence=prominence)
 
-    support = None
-    best_sup_dist = float("inf")
+    sup_level  = None
+    best_sup   = float("inf")
     for idx in troughs:
-        level = lows[idx]
-        dist = cur - level
-        if dist >= min_dist and dist < best_sup_dist:
-            body_hi = max(daily["Open"].iloc[idx], daily["Close"].iloc[idx])
-            support = {
-                "level": level,
-                "low":   level,
-                "high":  body_hi,
-                "dist":  dist,
-            }
-            best_sup_dist = dist
+        lv   = lows[idx]
+        dist = cur - lv
+        if dist >= min_dist and dist < best_sup:
+            sup_level = lv
+            best_sup  = dist
 
-    # ── Fallback: اگه هیچ swing پیدا نشد، از کف/سقف ۹۰ روزه استفاده کن ──
-    if support is None:
-        level = lows.min()
-        if cur - level >= min_dist:
-            support = {"level": level, "low": level, "high": level * 1.001, "dist": cur - level}
+    # ── Fallback: اگه swing پیدا نشد → از کف/سقف کل بازه استفاده کن ──
+    if sup_level is None:
+        lv = lows.min()
+        if cur - lv >= min_dist:
+            sup_level = lv
+        else:
+            # کف کل دوره حتی اگه نزدیکه
+            sup_level = lv
 
-    if resistance is None:
-        level = highs.max()
-        if level - cur >= min_dist:
-            resistance = {"level": level, "low": level * 0.999, "high": level, "dist": level - cur}
+    if res_level is None:
+        lv = highs.max()
+        if lv - cur >= min_dist:
+            res_level = lv
+        else:
+            res_level = lv
 
-    return support, resistance
+    return sup_level, res_level
 
 
 # ─── رسم کندل‌استیک ──────────────────────────────────────────────────────────
@@ -134,9 +121,10 @@ def _draw_candles(ax, df):
 
 def generate_chart_bytes(asset_key: str):
     """
-    داده ۱H رو از yfinance می‌گیره، OB حمایت و مقاومت رو حساب می‌کنه،
-    و یه tuple (png_bytes, support_mid, resistance_mid) برمی‌گردونه.
-    در صورت خطا None برمی‌گردونه.
+    ۳۰ روز داده ۱H رو دانلود می‌کنه.
+    سطوح Swing از کل ۳۰ روز محاسبه می‌شن (بازتر).
+    فقط ۶۰ کندل آخر روی چارت نشون داده می‌شه.
+    برمی‌گردونه: (png_bytes, support_level, resistance_level) یا (None, None, None)
     """
     import yfinance as yf
     import matplotlib
@@ -149,37 +137,41 @@ def generate_chart_bytes(asset_key: str):
     if not cfg:
         return None, None, None
 
-    # ─── دریافت داده ۱H برای چارت ───
+    # ─── دریافت ۳۰ روز داده ۱H (یه call) ───
     try:
-        hist = yf.Ticker(cfg["ticker"]).history(period="5d", interval="1h")
-        if hist.empty:
+        hist_all = yf.Ticker(cfg["ticker"]).history(period="30d", interval="1h")
+        if hist_all.empty or len(hist_all) < 20:
             logger.error(f"No data for {asset_key}")
             return None, None, None
-        hist = hist.tail(80).copy()
-        hist.reset_index(inplace=True)
+        hist_all.reset_index(inplace=True)
     except Exception as e:
         logger.error(f"yfinance error for {asset_key}: {e}")
         return None, None, None
 
-    cur_price = hist["Close"].iloc[-1]
+    cur = float(hist_all["Close"].iloc[-1])
 
-    # ─── سطوح از Daily Swing High/Low ───
+    # ─── سطوح از کل ۳۰ روز ───
     try:
-        support, resistance = find_key_levels(cfg["ticker"], cur_price, asset_key)
+        sup_level, res_level = find_swing_levels(hist_all, cur, asset_key)
     except Exception as e:
-        logger.error(f"Key level detection error: {e}")
-        support, resistance = None, None
+        logger.error(f"Swing level error: {e}")
+        sup_level, res_level = None, None
 
-    # ─── میانه‌ی ناحیه‌ها (برای پاس دادن به caption) ───
-    sup_mid = support["level"] if support else None
-    res_mid = resistance["level"] if resistance else None
+    # ─── ۶۰ کندل آخر برای نمایش ───
+    hist = hist_all.tail(60).copy()
+    hist.reset_index(drop=True, inplace=True)
 
-    n      = len(hist)
-    cur    = cur_price
-    fmt    = cfg["price_fmt"]
-    p_min  = hist["Low"].min()
-    p_max  = hist["High"].max()
-    pad    = (p_max - p_min) * 0.08
+    n   = len(hist)
+    fmt = cfg["price_fmt"]
+
+    # ─── محدوده Y: همیشه سطوح رو شامل بشه ───
+    y_min = hist["Low"].min()
+    y_max = hist["High"].max()
+    if sup_level is not None:
+        y_min = min(y_min, sup_level)
+    if res_level is not None:
+        y_max = max(y_max, res_level)
+    pad   = (y_max - y_min) * 0.06
 
     # ─── Figure ───
     fig = plt.figure(figsize=(16, 9), facecolor=BG)
@@ -202,25 +194,23 @@ def generate_chart_bytes(asset_key: str):
         axv.bar(i, r["Volume"], color=(UP if r["Close"] >= r["Open"] else DOWN),
                 alpha=0.4, width=0.6)
 
-    # ─── خط حمایت (Daily Swing Low) ───
-    if support:
-        s_lv = support["level"]
-        band = max(cur * 0.002, (p_max - p_min) * 0.004)   # باند نمایشی
-        ax.axhspan(s_lv - band, s_lv + band, color=SUP_CLR, alpha=0.18, zorder=1)
-        ax.axhline(s_lv, color=SUP_CLR, lw=1.8, ls="--", alpha=0.95, zorder=4)
-        ax.text(n + 0.8, s_lv,
-                f" 🟢 Support\n {s_lv:{fmt}}",
+    # ─── خط حمایت ───
+    if sup_level is not None:
+        band = max(cur * 0.001, (y_max - y_min) * 0.003)
+        ax.axhspan(sup_level - band, sup_level + band, color=SUP_CLR, alpha=0.18, zorder=1)
+        ax.axhline(sup_level, color=SUP_CLR, lw=1.8, ls="--", alpha=0.95, zorder=4)
+        ax.text(n + 0.8, sup_level,
+                f" 🟢 Support\n {sup_level:{fmt}}",
                 color=SUP_CLR, fontsize=8.5, va="center",
                 fontweight="bold", clip_on=False, linespacing=1.5)
 
-    # ─── خط مقاومت (Daily Swing High) ───
-    if resistance:
-        r_lv = resistance["level"]
-        band = max(cur * 0.002, (p_max - p_min) * 0.004)
-        ax.axhspan(r_lv - band, r_lv + band, color=RES_CLR, alpha=0.18, zorder=1)
-        ax.axhline(r_lv, color=RES_CLR, lw=1.8, ls="--", alpha=0.95, zorder=4)
-        ax.text(n + 0.8, r_lv,
-                f" 🔴 Resistance\n {r_lv:{fmt}}",
+    # ─── خط مقاومت ───
+    if res_level is not None:
+        band = max(cur * 0.001, (y_max - y_min) * 0.003)
+        ax.axhspan(res_level - band, res_level + band, color=RES_CLR, alpha=0.18, zorder=1)
+        ax.axhline(res_level, color=RES_CLR, lw=1.8, ls="--", alpha=0.95, zorder=4)
+        ax.text(n + 0.8, res_level,
+                f" 🔴 Resistance\n {res_level:{fmt}}",
                 color=RES_CLR, fontsize=8.5, va="center",
                 fontweight="bold", clip_on=False, linespacing=1.5)
 
@@ -243,39 +233,35 @@ def generate_chart_bytes(asset_key: str):
     )
 
     ax.set_xlim(-1, n + 14)
-    ax.set_ylim(p_min - pad, p_max + pad)
+    ax.set_ylim(y_min - pad, y_max + pad)
 
     # محور Y (قیمت)
     ax.yaxis.tick_right()
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(
-        lambda v, _: f"{v:{fmt}}"
-    ))
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:{fmt}}"))
     ax.tick_params(axis="y", colors=TEXT, labelsize=7.5,
                    right=True, labelright=True, left=False, labelleft=False)
-
     axv.yaxis.set_major_formatter(mticker.FuncFormatter(
         lambda v, _: f"{v/1e6:.1f}M" if v >= 1e6 else f"{v/1e3:.0f}K"
     ))
 
-    # ─── عنوان و راهنما ───
+    # ─── عنوان ───
     fig.text(0.013, 0.978, cfg["label"], color=TEXT,
              fontsize=13, fontweight="bold", va="top")
     fig.text(0.013, 0.945, f"Price: {cur:{fmt}}",
              color=CUR_CLR, fontsize=10.5, va="top", fontweight="bold")
 
-    # ICT info
     info_parts = []
-    if support:
-        info_parts.append(f"Support: {support['level']:{fmt}}")
-    if resistance:
-        info_parts.append(f"Resistance: {resistance['level']:{fmt}}")
+    if sup_level is not None:
+        info_parts.append(f"Support: {sup_level:{fmt}}")
+    if res_level is not None:
+        info_parts.append(f"Resistance: {res_level:{fmt}}")
     if info_parts:
         fig.text(0.013, 0.912, "  ·  ".join(info_parts),
                  color=TEXT, fontsize=9, va="top")
 
     legend = [
-        mpatches.Patch(color=SUP_CLR, label="Support — Daily Swing Low"),
-        mpatches.Patch(color=RES_CLR, label="Resistance — Daily Swing High"),
+        mpatches.Patch(color=SUP_CLR, label="Support  (30D Swing Low)"),
+        mpatches.Patch(color=RES_CLR, label="Resistance  (30D Swing High)"),
         mpatches.Patch(color=CUR_CLR, label="Current Price"),
         mpatches.Patch(color=UP,      label="Bullish candle"),
         mpatches.Patch(color=DOWN,    label="Bearish candle"),
@@ -284,24 +270,20 @@ def generate_chart_bytes(asset_key: str):
               facecolor=PANEL, edgecolor=BORDER,
               labelcolor=TEXT, fontsize=8.5, framealpha=0.92)
 
-    fig.text(0.99, 0.008, "MoneyMap Bot  ·  Daily Swing High/Low",
+    fig.text(0.99, 0.008, "MoneyMap Bot  ·  30D Swing High/Low",
              color="#3a3f52", fontsize=7.5, ha="right", va="bottom", style="italic")
 
-    # ─── ذخیره در حافظه ───
+    # ─── ذخیره ───
     plt.tight_layout(rect=[0, 0, 0.90, 1])
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150,
                 bbox_inches="tight", facecolor=BG, edgecolor="none")
     plt.close(fig)
     buf.seek(0)
-    return buf.read(), sup_mid, res_mid
+    return buf.read(), sup_level, res_level
 
 
 async def generate_chart_bytes_async(asset_key: str):
-    """
-    نسخه async از generate_chart_bytes — برای استفاده در telegram_bot.
-    برمی‌گردونه: (png_bytes, support_mid, resistance_mid) یا (None, None, None)
-    """
     import asyncio
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, generate_chart_bytes, asset_key)
