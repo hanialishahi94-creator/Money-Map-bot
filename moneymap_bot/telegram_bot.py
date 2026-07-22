@@ -598,7 +598,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("🗓 تقویم اقتصادی", callback_data="calendar_menu")],
         [InlineKeyboardButton("🔔 هشدار قیمت", callback_data="alert_menu"),
          InlineKeyboardButton("💎 اشتراک VIP سیگنال", callback_data="vip_menu")],
-        [InlineKeyboardButton("🔥 فرصت‌های امروز", callback_data="opportunity")],
         [InlineKeyboardButton("📞 پشتیبانی", callback_data="support_menu")],
     ])
     user_id = update.effective_user.id
@@ -609,28 +608,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=keyboard)
     elif update.callback_query:
         await update.callback_query.message.reply_text(text, reply_markup=keyboard)
-
-
-async def opportunity_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش امتیاز فرصت‌های سرمایه‌گذاری (۰–۱۰۰) برای ۵ دارایی."""
-    query = update.callback_query
-    await query.answer("⏳ در حال محاسبه امتیازها...")
-    await query.message.reply_text("⏳ در حال دریافت داده‌های بازار...")
-
-    try:
-        import opportunity_scorer
-        scores = await opportunity_scorer.get_all_scores()
-        text = opportunity_scorer.format_scores(scores)
-    except Exception as e:
-        logger.error(f"opportunity_menu error: {e}")
-        text = "⚠️ دریافت اطلاعات موفق نبود. لطفاً دقایقی دیگر دوباره امتحان کن."
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="opportunity")],
-        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
-    ])
-    await query.message.reply_text(text, reply_markup=keyboard)
-    return MAIN_MENU
 
 
 async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2619,7 +2596,6 @@ def main():
                 CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"),
                 CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"),
                 CallbackQueryHandler(support_menu, pattern="^support_menu$"),
-                CallbackQueryHandler(opportunity_menu, pattern="^opportunity$"),
                 CallbackQueryHandler(alert_menu, pattern="^alert_menu$"),
                 CallbackQueryHandler(alert_new, pattern="^alert_new$"),
                 CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"),
@@ -2669,7 +2645,6 @@ def main():
     app.add_handler(CallbackQueryHandler(car_prices_menu, pattern="^car_prices$"))
     app.add_handler(CallbackQueryHandler(sentiment_menu, pattern="^sentiment_menu$"))
     app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
-    app.add_handler(CallbackQueryHandler(opportunity_menu, pattern="^opportunity$"))
     app.add_handler(CallbackQueryHandler(alert_menu, pattern="^alert_menu$"))
     app.add_handler(CallbackQueryHandler(alert_new, pattern="^alert_new$"))
     app.add_handler(CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"))
