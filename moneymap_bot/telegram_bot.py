@@ -568,13 +568,16 @@ async def fetch_all_car_prices():
 
 async def car_prices_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("⌛ در حال دریافت قیمت‌ها...")
+    await query.answer()
+    loading = await query.message.reply_text(
+        "⏳ در حال دریافت قیمت‌ها...\nچند ثانیه صبر کنید"
+    )
     text = await fetch_all_car_prices()
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی", callback_data="car_prices")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
-    await query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    await loading.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
     return MAIN_MENU
 
 
