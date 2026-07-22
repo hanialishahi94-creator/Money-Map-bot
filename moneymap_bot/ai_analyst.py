@@ -112,34 +112,60 @@ async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> st
 # ─── فراخوانی Groq API ────────────────────────────────────────────────────────
 
 async def _call_groq(prompt: str) -> str:
-    """ارسال پرامپت به Groq LLaMA و دریافت پاسخ فارسی پاک."""
+    """ارسال پرامپت به Groq LLaMA و دریافت پاسخ فارسی پاک — با retry خودکار برای 429."""
     import httpx
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         logger.error("GROQ_API_KEY تنظیم نشده")
         return "❌ خطا: کلید GROQ_API_KEY تنظیم نشده."
 
-    try:
-        async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 2000,
-                    "temperature": 0.65,
-                },
-            )
-            response.raise_for_status()
-            result = response.json()["choices"][0]["message"]["content"]
-            return _clean_ai_output(result)
-    except Exception as e:
-        logger.error(f"خطا در فراخوانی Groq: {e}")
-        return f"❌ خطا در تولید تحلیل: {e}"
+    max_retries = 4
+    base_delay = 15  # ثانیه — شروع انتظار بعد از 429
+
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 2000,
+                        "temperature": 0.65,
+                    },
+                )
+
+                if response.status_code == 429:
+                    # از هدر Retry-After استفاده کن اگه موجود بود
+                    retry_after = int(response.headers.get("retry-after", base_delay * (attempt + 1)))
+                    logger.warning(f"Groq 429 — تلاش {attempt + 1}/{max_retries} — صبر {retry_after}s")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_after)
+                        continue
+                    else:
+                        return "❌ سرور AI شلوغه، چند دقیقه دیگه دوباره امتحان کن."
+
+                response.raise_for_status()
+                result = response.json()["choices"][0]["message"]["content"]
+                return _clean_ai_output(result)
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                delay = base_delay * (attempt + 1)
+                logger.warning(f"Groq 429 HTTPStatusError — صبر {delay}s")
+                await asyncio.sleep(delay)
+                continue
+            logger.error(f"خطا در فراخوانی Groq: {e}")
+            return f"❌ خطا در تولید تحلیل: {e}"
+        except Exception as e:
+            logger.error(f"خطا در فراخوانی Groq: {e}")
+            return f"❌ خطا در تولید تحلیل: {e}"
+
+    return "❌ سرور AI شلوغه، چند دقیقه دیگه دوباره امتحان کن."
 
 
 # ─── داده‌های بازار ────────────────────────────────────────────────────────────
