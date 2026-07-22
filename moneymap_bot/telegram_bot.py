@@ -2741,6 +2741,8 @@ def main():
         entry_points=[
             CommandHandler("start", start),
             CallbackQueryHandler(gold_custom_start, pattern="^gold_custom$"),
+            CallbackQueryHandler(alert_new, pattern="^alert_new$"),
+            CallbackQueryHandler(alert_asset_selected, pattern="^alert_asset_(gold|dollar|bitcoin|ethereum|gold_ounce)$"),
         ],
         allow_reentry=True,
         states={
