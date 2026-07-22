@@ -1559,27 +1559,23 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plt.close(fig)
 
     asset_word = "طلا" if fund_type == "gold" else "نقره"
-    source_note = "fundbase.ir" if fund_type == "gold" else "tradersarena.ir"
     avg_sign = "+" if avg >= 0 else ""
-    caption_lines = [
-        f"🫧 *حباب صندوق‌های {label}*",
-        "",
-        f"📊 میانگین حباب: *{avg_sign}{avg:.1f}٪*",
-        f"{'🔴 گران‌تر از ارزش ذاتی' if avg > 0 else '🟢 ارزان‌تر از ارزش ذاتی'}",
-        "",
-        "💡 *حباب چیه؟*",
-        f"اختلاف قیمت معامله‌شده صندوق با ارزش واقعی {asset_word}ی که پشتشه.",
-        f"مثبت = گرون‌تر از واقعیت  |  منفی = ارزون‌تر",
-        "",
-        f"📌 داده از {source_note} — ممکنه با تب‌های مختلف سایت تفاوت جزئی داشته باشه.",
-    ]
-    if stale_note:
-        caption_lines.append(stale_note.strip())
+    bubble_explainer = (
+        "💡 حباب یعنی چی؟\n"
+        f"وقتی قیمتی که یه صندوق {asset_word} توی بازار بورس معامله می‌شه، با ارزش واقعی {asset_word}ی که پشتشه یکی نباشه، "
+        "به این اختلاف «حباب» می‌گن. اگه حباب مثبت باشه یعنی صندوق گرون‌تر از ارزش واقعی داراییش معامله می‌شه؛ "
+        "اگه منفی باشه یعنی ارزون‌تر معامله می‌شه."
+    )
+    caption = (
+        f"🫧 حباب صندوق‌های {label}\n\n"
+        f"📊 میانگین حباب: {avg_sign}{avg:.1f}٪\n\n"
+        f"{bubble_explainer}"
+        f"{stale_note}"
+    )
 
     await query.message.reply_photo(
         photo=buf,
-        caption="\n".join(caption_lines),
-        parse_mode="Markdown",
+        caption=caption,
         reply_markup=keyboard,
     )
     return MAIN_MENU
