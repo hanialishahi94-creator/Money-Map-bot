@@ -123,6 +123,16 @@ def init_db():
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS support_map (
+                msg_id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+
         # مقداردهی اولیه تحلیل‌ها در صورت خالی بودن جدول
         existing = conn.execute("SELECT asset FROM analyses").fetchall()
         existing_assets = {row["asset"] for row in existing}
@@ -544,6 +554,26 @@ def clear_ai_edit_waiting(prompt_msg_id: int):
     """حذف رکورد ویرایش بعد از پردازش."""
     with get_conn() as conn:
         conn.execute("DELETE FROM settings WHERE key = ?", (f"ai_edit:{prompt_msg_id}",))
+
+
+# ---------- نگاشت پیام پشتیبانی → کاربر ----------
+
+def save_support_msg(msg_id: int, user_id: int):
+    """ذخیره رابطه‌ی msg_id گروه پشتیبانی → user_id کاربر."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO support_map (msg_id, user_id, created_at) VALUES (?, ?, ?)",
+            (msg_id, user_id, time.time()),
+        )
+
+
+def get_support_user(msg_id: int) -> int | None:
+    """پیدا کردن user_id کاربر از msg_id پیام گروه پشتیبانی."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM support_map WHERE msg_id = ?", (msg_id,)
+        ).fetchone()
+        return row["user_id"] if row else None
 
 
 # ---------- تاریخچه قیمت دلار (برای امتیاز فرصت) ----------

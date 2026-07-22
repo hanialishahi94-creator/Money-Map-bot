@@ -1872,7 +1872,7 @@ async def handle_non_photo_while_waiting_receipt(update: Update, context: Contex
                 f"✉️ پیام:\n{update.message.text}"
             ),
         )
-        context.bot_data.setdefault("support_map", {})[sent.message_id] = user_id
+        db.save_support_msg(sent.message_id, user_id)
         await update.message.reply_text("✅ پیامت برای پشتیبانی ارسال شد. به‌زودی جواب می‌گیری.")
         return
 
@@ -1898,8 +1898,8 @@ async def support_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = update.message
     if not msg or not msg.reply_to_message or not msg.text:
         return
-    support_map = context.bot_data.get("support_map", {})
-    target_user_id = support_map.get(msg.reply_to_message.message_id)
+    # از DB بخون (بعد از restart هم کار می‌کنه)
+    target_user_id = db.get_support_user(msg.reply_to_message.message_id)
     if not target_user_id:
         return
     try:
@@ -1907,7 +1907,7 @@ async def support_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
             chat_id=target_user_id,
             text=f"📞 پاسخ پشتیبانی:\n{msg.text}",
         )
-        await msg.reply_text("✅ ارسال شد.")
+        await msg.reply_text("✅ پیام ارسال شد.")
     except Exception as e:
         await msg.reply_text(f"⚠️ خطا در ارسال پاسخ: {e}")
 
@@ -2832,6 +2832,11 @@ def main():
         filters.ChatType.GROUPS & (filters.TEXT | filters.VOICE),
         ai_edit_prompt_handler,
     ), group=-1)
+    # پاسخ ادمین به پیام پشتیبانی در گروه پشتیبانی
+    app.add_handler(MessageHandler(
+        filters.Chat(SUPPORT_GROUP_ID) & filters.REPLY & filters.TEXT,
+        support_group_reply,
+    ))
 
     if app.job_queue is not None:
         app.job_queue.run_repeating(check_vip_expirations, interval=3600, first=15)
