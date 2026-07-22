@@ -2707,9 +2707,29 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
         import ai_analyst
         new_text = await ai_analyst.edit_analysis(original_text, edit_prompt, asset_key)
 
-        # ai_pending رو آپدیت کن
+        # چارت رو دوباره تولید کن تا سطوح به‌روز بشن
+        new_chart_bytes = None
+        try:
+            import chart_generator as _cg
+            import io as _io_inner
+            result = await _cg.generate_chart_bytes_async(asset_key)
+            new_chart_bytes = result[0] if result else None
+            if new_chart_bytes:
+                await msg.reply_photo(
+                    photo=_io_inner.BytesIO(new_chart_bytes),
+                    caption=f"📊 چارت آپدیت شده — {ai_analyst.ASSETS[asset_key]['fa_name']}",
+                )
+        except Exception as _ce:
+            logger.warning(f"Chart regen after edit failed: {_ce}")
+
+        # ai_pending رو آپدیت کن (با chart_bytes جدید)
         pending_key = f"{asset_key}:{original_msg_id}"
-        context.bot_data.setdefault("ai_pending", {})[pending_key] = {"text": new_text, "date": today}
+        context.bot_data.setdefault("ai_pending", {})[pending_key] = {
+            "text": new_text,
+            "date": today,
+            "chart_bytes": new_chart_bytes,
+            "asset": asset_key,
+        }
 
         asset = ai_analyst.ASSETS[asset_key]
         new_caption = (
@@ -2736,7 +2756,7 @@ async def ai_edit_prompt_handler(update: Update, context: ContextTypes.DEFAULT_T
             await msg.reply_text(new_caption, reply_markup=keyboard)
 
         try:
-            await thinking.edit_text("✅ تحلیل ویرایش شد! پیام بالا آپدیت شده.")
+            await thinking.edit_text("✅ تحلیل و چارت ویرایش شد! پیام بالا آپدیت شده.")
         except Exception:
             pass
 
