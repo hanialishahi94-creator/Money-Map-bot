@@ -1,6 +1,5 @@
 """
-chart_generator.py — چارت کندل‌استیک ۱H با یک ناحیه حمایت + یک ناحیه مقاومت
-سبک ICT/LIT (Order Block Detection)
+chart_generator.py — چارت کندل‌استیک ۱H با سطوح حمایت/مقاومت از Daily Swing High/Low
 """
 import io
 import logging
@@ -16,6 +15,13 @@ ASSET_CONFIG = {
     "dollar":  {"ticker": "DX-Y.NYB",  "label": "DXY · Dollar Index · 1H","price_fmt": ",.3f"},
 }
 
+# حداقل فاصله سطح از قیمت فعلی (درصد) — برای فیلتر سطوح خیلی نزدیک
+MIN_DIST_PCT = {
+    "bitcoin": 0.02,   # ۲٪ برای بیتکوین (نوسان بالا)
+    "gold":    0.008,  # ۰.۸٪ برای طلا
+    "dollar":  0.003,  # ۰.۳٪ برای دلار ایندکس
+}
+
 # ─── رنگ‌های تم (TradingView Dark) ───────────────────────────────────────────
 BG      = "#131722"
 PANEL   = "#1e222d"
@@ -29,124 +35,82 @@ RES_CLR = "#ff1744"   # قرمز مقاومت
 CUR_CLR = "#ffeb3b"   # زرد قیمت فعلی
 
 
-# ─── الگوریتم ICT Order Block ────────────────────────────────────────────────
+# ─── پیدا کردن سطوح کلیدی از Daily Swing High/Low ───────────────────────────
 
-def find_ict_order_blocks(df: pd.DataFrame):
+def find_key_levels(ticker: str, cur: float, asset_key: str) -> tuple:
     """
-    پیدا کردن یک Bullish OB (حمایت) و یک Bearish OB (مقاومت) بر اساس سبک ICT.
+    سطوح حمایت و مقاومت رو از داده‌های Daily (۹۰ روز) پیدا می‌کنه.
+    از Swing High/Low با حداقل فاصله معنادار از قیمت فعلی استفاده می‌کنه.
 
-    Bullish OB = آخرین کندل نزولی قبل از یک حرکت صعودی قوی → ناحیه حمایت
-    Bearish OB = آخرین کندل صعودی قبل از یک حرکت نزولی قوی → ناحیه مقاومت
-
-    هر OB که هنوز Mitigate نشده (قیمت کاملاً ازش رد نشده) اولویت داره.
+    برمی‌گردونه: (support_dict, resistance_dict)
+    هر dict داره: {"level": float, "low": float, "high": float}
     """
-    opens  = df["Open"].values
-    closes = df["Close"].values
-    highs  = df["High"].values
-    lows   = df["Low"].values
-    n      = len(df)
-    cur    = closes[-1]
+    import yfinance as yf
+    from scipy.signal import find_peaks
 
-    # حداقل درصد حرکت بعدی که یک OB رو تأیید می‌کنه
-    move_thresh = 0.004   # 0.4% برای BTC/Gold/DXY تناسب داره
-
-    candidates_bull = []   # OB‌های صعودی (حمایت) — زیر قیمت فعلی
-    candidates_bear = []   # OB‌های نزولی (مقاومت) — بالای قیمت فعلی
-
-    for i in range(2, n - 4):
-        # ─── حرکت قوی بعدی (در ۳ کندل آینده) ───
-        move = (closes[i + 3] - closes[i]) / closes[i]
-
-        # ── Bullish OB ──
-        # کندل i نزولی باشه (close < open)
-        # حرکت بعدی به بالا باشه (move > thresh)
-        if closes[i] < opens[i] and move > move_thresh:
-            ob_low  = min(opens[i], closes[i])
-            ob_high = max(opens[i], closes[i])
-
-            # OB باید زیر قیمت فعلی باشه (ناحیه حمایت)
-            if ob_high < cur:
-                # بررسی unmitigated: قیمت بعداً از OB رد نشده باشه
-                future_low = lows[i + 1: min(i + 30, n)].min() if i + 1 < n else ob_low
-                is_fresh = future_low >= ob_low * 0.997   # در tolerance ۰.۳٪
-
-                candidates_bull.append({
-                    "low":    ob_low,
-                    "high":   ob_high,
-                    "idx":    i,
-                    "fresh":  is_fresh,
-                    "dist":   cur - ob_high,
-                })
-
-        # ── Bearish OB ──
-        # کندل i صعودی باشه (close > open)
-        # حرکت بعدی به پایین باشه (move < -thresh)
-        if closes[i] > opens[i] and move < -move_thresh:
-            ob_low  = min(opens[i], closes[i])
-            ob_high = max(opens[i], closes[i])
-
-            # OB باید بالای قیمت فعلی باشه (ناحیه مقاومت)
-            if ob_low > cur:
-                # بررسی unmitigated
-                future_high = highs[i + 1: min(i + 30, n)].max() if i + 1 < n else ob_high
-                is_fresh = future_high <= ob_high * 1.003
-
-                candidates_bear.append({
-                    "low":    ob_low,
-                    "high":   ob_high,
-                    "idx":    i,
-                    "fresh":  is_fresh,
-                    "dist":   ob_low - cur,
-                })
-
-    # ── انتخاب بهترین OB برای هر طرف ──
-    # حداقل فاصله از قیمت: از OB‌های خیلی نزدیک صرف‌نظر می‌کنیم
-    min_dist_pct = 0.005   # حداقل ۰.۵٪ فاصله از قیمت فعلی
+    min_dist_pct = MIN_DIST_PCT.get(asset_key, 0.01)
     min_dist = cur * min_dist_pct
 
-    def best_ob(candidates):
-        if not candidates:
-            return None
-        # فقط OB‌هایی که حداقل فاصله کافی از قیمت دارند
-        far_enough = [c for c in candidates if c["dist"] >= min_dist]
-        pool = far_enough if far_enough else candidates  # اگه همه نزدیک بودن، از همه انتخاب کن
-        fresh = [c for c in pool if c["fresh"]]
-        best_pool = fresh if fresh else pool
-        return min(best_pool, key=lambda c: c["dist"])
+    try:
+        daily = yf.Ticker(ticker).history(period="90d", interval="1d")
+        if daily.empty or len(daily) < 10:
+            return None, None
+    except Exception:
+        return None, None
 
-    support    = best_ob(candidates_bull)
-    resistance = best_ob(candidates_bear)
+    highs = daily["High"].values
+    lows  = daily["Low"].values
+    n     = len(daily)
 
-    # ── Fallback: اگه OB پیدا نشد از swing low/high استفاده کن ──
-    if support is None:
-        from scipy.signal import find_peaks
-        troughs, _ = find_peaks(-lows, distance=5,
-                                 prominence=(highs.max() - lows.min()) * 0.002)
-        below = [(i, lows[i]) for i in troughs if lows[i] < cur]
-        if below:
-            idx, lv = max(below, key=lambda x: x[0])
-            support = {
-                "low":  lv,
-                "high": max(opens[idx], closes[idx]),
-                "idx":  idx,
-                "fresh": True,
-                "dist": cur - lv,
+    # ── Swing Highs (مقاومت) ──
+    # پیک‌هایی که از هر دو طرف بالاترند (حداقل ۳ روز فاصله)
+    prominence_thresh = (highs.max() - lows.min()) * 0.008
+    peaks, props = find_peaks(highs, distance=3, prominence=prominence_thresh)
+
+    resistance = None
+    best_res_dist = float("inf")
+    for idx in peaks:
+        level = highs[idx]
+        dist = level - cur
+        if dist >= min_dist and dist < best_res_dist:
+            # ناحیه: از low کندل تا high کندل
+            body_lo = min(daily["Open"].iloc[idx], daily["Close"].iloc[idx])
+            resistance = {
+                "level": level,
+                "low":   body_lo,
+                "high":  level,
+                "dist":  dist,
             }
+            best_res_dist = dist
+
+    # ── Swing Lows (حمایت) ──
+    troughs, _ = find_peaks(-lows, distance=3, prominence=prominence_thresh)
+
+    support = None
+    best_sup_dist = float("inf")
+    for idx in troughs:
+        level = lows[idx]
+        dist = cur - level
+        if dist >= min_dist and dist < best_sup_dist:
+            body_hi = max(daily["Open"].iloc[idx], daily["Close"].iloc[idx])
+            support = {
+                "level": level,
+                "low":   level,
+                "high":  body_hi,
+                "dist":  dist,
+            }
+            best_sup_dist = dist
+
+    # ── Fallback: اگه هیچ swing پیدا نشد، از کف/سقف ۹۰ روزه استفاده کن ──
+    if support is None:
+        level = lows.min()
+        if cur - level >= min_dist:
+            support = {"level": level, "low": level, "high": level * 1.001, "dist": cur - level}
 
     if resistance is None:
-        from scipy.signal import find_peaks
-        peaks, _ = find_peaks(highs, distance=5,
-                               prominence=(highs.max() - lows.min()) * 0.002)
-        above = [(i, highs[i]) for i in peaks if highs[i] > cur]
-        if above:
-            idx, lv = max(above, key=lambda x: x[0])
-            resistance = {
-                "low":  min(opens[idx], closes[idx]),
-                "high": lv,
-                "idx":  idx,
-                "fresh": True,
-                "dist": lv - cur,
-            }
+        level = highs.max()
+        if level - cur >= min_dist:
+            resistance = {"level": level, "low": level * 0.999, "high": level, "dist": level - cur}
 
     return support, resistance
 
@@ -185,31 +149,33 @@ def generate_chart_bytes(asset_key: str):
     if not cfg:
         return None, None, None
 
-    # ─── دریافت داده ───
+    # ─── دریافت داده ۱H برای چارت ───
     try:
-        hist = yf.Ticker(cfg["ticker"]).history(period="30d", interval="1h")
+        hist = yf.Ticker(cfg["ticker"]).history(period="5d", interval="1h")
         if hist.empty:
             logger.error(f"No data for {asset_key}")
             return None, None, None
-        hist = hist.tail(120).copy()
+        hist = hist.tail(80).copy()
         hist.reset_index(inplace=True)
     except Exception as e:
         logger.error(f"yfinance error for {asset_key}: {e}")
         return None, None, None
 
-    # ─── محاسبه OB ───
+    cur_price = hist["Close"].iloc[-1]
+
+    # ─── سطوح از Daily Swing High/Low ───
     try:
-        support, resistance = find_ict_order_blocks(hist)
+        support, resistance = find_key_levels(cfg["ticker"], cur_price, asset_key)
     except Exception as e:
-        logger.error(f"OB detection error: {e}")
+        logger.error(f"Key level detection error: {e}")
         support, resistance = None, None
 
-    # ─── میانه‌ی ناحیه‌ها (برای پاس دادن به AI) ───
-    sup_mid = (support["low"] + support["high"]) / 2 if support else None
-    res_mid = (resistance["low"] + resistance["high"]) / 2 if resistance else None
+    # ─── میانه‌ی ناحیه‌ها (برای پاس دادن به caption) ───
+    sup_mid = support["level"] if support else None
+    res_mid = resistance["level"] if resistance else None
 
     n      = len(hist)
-    cur    = hist["Close"].iloc[-1]
+    cur    = cur_price
     fmt    = cfg["price_fmt"]
     p_min  = hist["Low"].min()
     p_max  = hist["High"].max()
@@ -236,39 +202,25 @@ def generate_chart_bytes(asset_key: str):
         axv.bar(i, r["Volume"], color=(UP if r["Close"] >= r["Open"] else DOWN),
                 alpha=0.4, width=0.6)
 
-    # ─── ناحیه حمایت (Bullish OB) ───
+    # ─── خط حمایت (Daily Swing Low) ───
     if support:
-        z_lo, z_hi = support["low"], support["high"]
-        # محدوده zone رو کمی گشاد کن که بهتر دیده بشه
-        gap = max((z_hi - z_lo) * 0.2, (p_max - p_min) * 0.003)
-        ax.axhspan(z_lo - gap * 0.5, z_hi + gap * 0.5,
-                   color=SUP_CLR, alpha=0.15, zorder=1)
-        ax.axhline(z_lo - gap * 0.5, color=SUP_CLR, lw=1.5, ls="--", alpha=0.9, zorder=4)
-        ax.axhline(z_hi + gap * 0.5, color=SUP_CLR, lw=1.5, ls="--", alpha=0.9, zorder=4)
-
-        # نقطه OB روی چارت
-        ax.axvline(support["idx"], color=SUP_CLR, lw=0.5, ls=":", alpha=0.4, zorder=1)
-
-        mid_sup = (z_lo + z_hi) / 2
-        ax.text(n + 0.8, mid_sup,
-                f" 🟢 Support OB\n {mid_sup:{fmt}}",
+        s_lv = support["level"]
+        band = max(cur * 0.002, (p_max - p_min) * 0.004)   # باند نمایشی
+        ax.axhspan(s_lv - band, s_lv + band, color=SUP_CLR, alpha=0.18, zorder=1)
+        ax.axhline(s_lv, color=SUP_CLR, lw=1.8, ls="--", alpha=0.95, zorder=4)
+        ax.text(n + 0.8, s_lv,
+                f" 🟢 Support\n {s_lv:{fmt}}",
                 color=SUP_CLR, fontsize=8.5, va="center",
                 fontweight="bold", clip_on=False, linespacing=1.5)
 
-    # ─── ناحیه مقاومت (Bearish OB) ───
+    # ─── خط مقاومت (Daily Swing High) ───
     if resistance:
-        z_lo, z_hi = resistance["low"], resistance["high"]
-        gap = max((z_hi - z_lo) * 0.2, (p_max - p_min) * 0.003)
-        ax.axhspan(z_lo - gap * 0.5, z_hi + gap * 0.5,
-                   color=RES_CLR, alpha=0.15, zorder=1)
-        ax.axhline(z_lo - gap * 0.5, color=RES_CLR, lw=1.5, ls="--", alpha=0.9, zorder=4)
-        ax.axhline(z_hi + gap * 0.5, color=RES_CLR, lw=1.5, ls="--", alpha=0.9, zorder=4)
-
-        ax.axvline(resistance["idx"], color=RES_CLR, lw=0.5, ls=":", alpha=0.4, zorder=1)
-
-        mid_res = (z_lo + z_hi) / 2
-        ax.text(n + 0.8, mid_res,
-                f" 🔴 Resist OB\n {mid_res:{fmt}}",
+        r_lv = resistance["level"]
+        band = max(cur * 0.002, (p_max - p_min) * 0.004)
+        ax.axhspan(r_lv - band, r_lv + band, color=RES_CLR, alpha=0.18, zorder=1)
+        ax.axhline(r_lv, color=RES_CLR, lw=1.8, ls="--", alpha=0.95, zorder=4)
+        ax.text(n + 0.8, r_lv,
+                f" 🔴 Resistance\n {r_lv:{fmt}}",
                 color=RES_CLR, fontsize=8.5, va="center",
                 fontweight="bold", clip_on=False, linespacing=1.5)
 
@@ -314,18 +266,16 @@ def generate_chart_bytes(asset_key: str):
     # ICT info
     info_parts = []
     if support:
-        m = (support["low"] + support["high"]) / 2
-        info_parts.append(f"Support OB: {m:{fmt}}")
+        info_parts.append(f"Support: {support['level']:{fmt}}")
     if resistance:
-        m = (resistance["low"] + resistance["high"]) / 2
-        info_parts.append(f"Resist OB: {m:{fmt}}")
+        info_parts.append(f"Resistance: {resistance['level']:{fmt}}")
     if info_parts:
         fig.text(0.013, 0.912, "  ·  ".join(info_parts),
                  color=TEXT, fontsize=9, va="top")
 
     legend = [
-        mpatches.Patch(color=SUP_CLR, label="Bullish OB — Support"),
-        mpatches.Patch(color=RES_CLR, label="Bearish OB — Resistance"),
+        mpatches.Patch(color=SUP_CLR, label="Support — Daily Swing Low"),
+        mpatches.Patch(color=RES_CLR, label="Resistance — Daily Swing High"),
         mpatches.Patch(color=CUR_CLR, label="Current Price"),
         mpatches.Patch(color=UP,      label="Bullish candle"),
         mpatches.Patch(color=DOWN,    label="Bearish candle"),
@@ -334,7 +284,7 @@ def generate_chart_bytes(asset_key: str):
               facecolor=PANEL, edgecolor=BORDER,
               labelcolor=TEXT, fontsize=8.5, framealpha=0.92)
 
-    fig.text(0.99, 0.008, "MoneyMap Bot  ·  ICT/LIT Order Block",
+    fig.text(0.99, 0.008, "MoneyMap Bot  ·  Daily Swing High/Low",
              color="#3a3f52", fontsize=7.5, ha="right", va="bottom", style="italic")
 
     # ─── ذخیره در حافظه ───
