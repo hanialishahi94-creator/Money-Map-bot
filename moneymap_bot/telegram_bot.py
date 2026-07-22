@@ -701,20 +701,13 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]
     ])
 
-    # ── چارت ذخیره‌شده + تحلیل با هم ──────────────────────────────────────
+    # ── چارت همیشه fresh + تحلیل با هم ────────────────────────────────────
     import io as _io
     try:
-        # اول چارت ذخیره‌شده در DB رو چک کن
-        stored = db.get_analysis(asset_key)
-        stored_chart = stored.get("chart_bytes") if stored else None
-
-        if stored_chart:
-            chart_bytes = stored_chart
-        else:
-            # اگه چارت ذخیره نشده، تازه تولید کن
-            import chart_generator
-            result = await chart_generator.generate_chart_bytes_async(asset_key)
-            chart_bytes = result[0] if result else None
+        # هر بار چارت رو تازه تولید کن (قیمت و سطوح به‌روز باشن)
+        import chart_generator
+        result = await chart_generator.generate_chart_bytes_async(asset_key)
+        chart_bytes = result[0] if result else None
 
         caption = f"📊 {asset_name}  ·  1H\n\n{analysis_text}"
         if len(caption) > 1024:
