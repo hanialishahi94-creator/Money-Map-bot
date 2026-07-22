@@ -1461,21 +1461,26 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif is_all_zero:
         stale_note = "\n\n⏳ بازار بسته است."
 
-    # مرتب نزولی
-    paired = sorted(zip(values, names), reverse=True)
+    # مرتب صعودی (منفی‌ترین سمت چپ، مثل نمودار حباب‌سنج)
+    paired = sorted(zip(values, names), reverse=False)
     values = [v for v, _ in paired]
     names_raw = [n for _, n in paired]
 
+    # محاسبه میانگین
+    avg = sum(values) / len(values)
+
     colors = []
     for v in values:
-        if v > 1:
-            colors.append("#e53935")
+        if v > 2:
+            colors.append("#C62828")   # قرمز تیره — حباب بالا
         elif v > 0:
-            colors.append("#FFA726")
+            colors.append("#ef5350")   # قرمز — حباب مثبت
+        elif v < -1:
+            colors.append("#2E7D32")   # سبز تیره — ارزنده
         elif v < 0:
-            colors.append("#43A047")
+            colors.append("#43A047")   # سبز — کمی ارزنده
         else:
-            colors.append("#90A4AE")
+            colors.append("#90A4AE")   # خنثی
 
     # آماده‌سازی فونت فارسی
     font_path = _prepare_persian_font()
@@ -1491,61 +1496,90 @@ async def bubble_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     names_label = [_reshape_persian(n) for n in names_raw]
     title_display = _reshape_persian(title_fa)
 
-    fig, ax = plt.subplots(figsize=(max(10, len(names_label) * 0.85), 5.5))
-    fig.patch.set_facecolor("#FAFAFA")
-    ax.set_facecolor("#FAFAFA")
+    fig, ax = plt.subplots(figsize=(max(12, len(names_label) * 0.9), 6.5))
+    fig.patch.set_facecolor("#F5F5F5")
+    ax.set_facecolor("#FFFFFF")
 
-    bars = ax.bar(range(len(names_label)), values, color=colors, width=0.6, zorder=3)
-    ax.axhline(0, color="#888", linewidth=1, linestyle="--", zorder=2)
+    bars = ax.bar(range(len(names_label)), values, color=colors, width=0.65,
+                  zorder=3, edgecolor="white", linewidth=0.6)
+
+    # خط صفر
+    ax.axhline(0, color="#444", linewidth=1.2, linestyle="-", zorder=2)
+
+    # خط میانگین (نارنجی)
+    ax.axhline(avg, color="#E65100", linewidth=1.8, linestyle="--", zorder=4, alpha=0.85)
+    avg_label = _reshape_persian(f"میانگین {avg:+.1f}٪")
+    avg_label_kw = dict(ha="right", va="bottom" if avg >= 0 else "top",
+                        color="#E65100", fontsize=9, fontweight="bold", zorder=5)
+    if persian_font:
+        avg_label_kw["fontproperties"] = persian_font
+    ax.text(len(names_label) - 0.5, avg + (0.08 if avg >= 0 else -0.08),
+            avg_label, **avg_label_kw)
+
     ax.set_xticks(range(len(names_label)))
+    ax.set_xticklabels(names_label, fontsize=8.5, rotation=40, ha="right", **fa_prop)
 
-    # اعمال فونت فارسی روی tick labels
-    ax.set_xticklabels(names_label, fontsize=9, rotation=35, ha="right", **fa_prop)
-
+    # برچسب روی هر بار
+    val_range = max(values) - min(values) if len(values) > 1 else 1
+    offset = val_range * 0.025
     for bar, val in zip(bars, values):
         sign = "+" if val >= 0 else ""
+        y = val + offset if val >= 0 else val - offset
+        va = "bottom" if val >= 0 else "top"
         ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + (0.04 if val >= 0 else -0.14),
+            bar.get_x() + bar.get_width() / 2, y,
             f"{sign}{val:.1f}%",
-            ha="center", va="bottom" if val >= 0 else "top",
-            fontsize=8, fontweight="bold", color="#333"
+            ha="center", va=va, fontsize=7.5, fontweight="bold", color="#1a1a1a"
         )
 
-    # عنوان فارسی
-    title_kwargs = {"fontsize": 13, "fontweight": "bold", "color": "#1a1a2e", "pad": 12}
+    # عنوان
+    title_kwargs = {"fontsize": 14, "fontweight": "bold", "color": "#1a1a2e", "pad": 14}
     if persian_font:
         title_kwargs["fontproperties"] = persian_font
     ax.set_title(title_display, **title_kwargs)
 
-    ax.set_ylabel("Bubble Total (%)", fontsize=10, color="#444")
-    ax.grid(axis="y", linestyle="--", alpha=0.4, zorder=1)
+    ax.set_ylabel("حباب کل (%)", fontsize=10, color="#555")
+    ax.grid(axis="y", linestyle="--", alpha=0.35, zorder=1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#ccc")
+    ax.spines["bottom"].set_color("#ccc")
 
-    plt.tight_layout()
+    plt.tight_layout(pad=1.5)
 
-    # متن گوشه بالا راست
-    wm_kw = dict(ha="right", va="top", fontsize=9, color="#C8922A", alpha=1.0, fontweight="bold")
+    # واترمارک
+    wm_kw = dict(ha="right", va="top", fontsize=8.5, color="#B8860B", alpha=0.9, fontweight="bold")
     if persian_font:
         wm_kw["fontproperties"] = persian_font
-    fig.text(0.99, 0.99, _reshape_persian("تهیه شده در گروه تحلیلی مانی مپ"), **wm_kw)
+    fig.text(0.99, 0.99, _reshape_persian("مانی مپ | MoneyMap"), **wm_kw)
 
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    plt.savefig(buf, format="png", dpi=140, bbox_inches="tight")
     buf.seek(0)
     plt.close(fig)
 
     asset_word = "طلا" if fund_type == "gold" else "نقره"
-    bubble_explainer = (
-        "💡 حباب یعنی چی؟\n"
-        f"وقتی قیمتی که یه صندوق {asset_word} توی بازار بورس معامله می‌شه، با ارزش واقعی {asset_word}ی که پشتشه یکی نباشه، "
-        "به این اختلاف «حباب» می‌گن. اگه حباب مثبت باشه یعنی صندوق گرون‌تر از ارزش واقعی داراییش معامله می‌شه؛ "
-        "اگه منفی باشه یعنی ارزون‌تر معامله می‌شه."
-    )
+    source_note = "fundbase.ir" if fund_type == "gold" else "tradersarena.ir"
+    avg_sign = "+" if avg >= 0 else ""
+    caption_lines = [
+        f"🫧 *حباب صندوق‌های {label}*",
+        "",
+        f"📊 میانگین حباب: *{avg_sign}{avg:.1f}٪*",
+        f"{'🔴 گران‌تر از ارزش ذاتی' if avg > 0 else '🟢 ارزان‌تر از ارزش ذاتی'}",
+        "",
+        "💡 *حباب چیه؟*",
+        f"اختلاف قیمت معامله‌شده صندوق با ارزش واقعی {asset_word}ی که پشتشه.",
+        f"مثبت = گرون‌تر از واقعیت  |  منفی = ارزون‌تر",
+        "",
+        f"📌 داده از {source_note} — ممکنه با تب‌های مختلف سایت تفاوت جزئی داشته باشه.",
+    ]
+    if stale_note:
+        caption_lines.append(stale_note.strip())
+
     await query.message.reply_photo(
         photo=buf,
-        caption=f"🫧 حباب صندوق‌های {label}\n\n{bubble_explainer}{stale_note}",
+        caption="\n".join(caption_lines),
+        parse_mode="Markdown",
         reply_markup=keyboard,
     )
     return MAIN_MENU
