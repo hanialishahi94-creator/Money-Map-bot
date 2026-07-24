@@ -814,7 +814,7 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📡 محاسبه ارزش فعلی", callback_data="gold_live")],
-        [InlineKeyboardButton("✏️ محاسبه با مفروضات دلخواه", callback_data="gold_custom")],
+        [InlineKeyboardButton("📊 ماشین حساب حساسیت طلا", callback_data="gold_custom")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
@@ -844,7 +844,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی مجدد", callback_data="gold_live")],
-        [InlineKeyboardButton("✏️ محاسبه با مفروضات دلخواه", callback_data="gold_custom")],
+        [InlineKeyboardButton("📊 ماشین حساب حساسیت طلا", callback_data="gold_custom")],
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
@@ -858,7 +858,7 @@ async def gold_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(
-        "✏️ محاسبه با مفروضات دلخواه\n\n"
+        "📊 ماشین حساب حساسیت طلا\n\n"
         "💡 با این ابزار می‌تونی با وارد کردن پیش‌بینی قیمت اونس طلا و نرخ دلار در آینده، "
         "ارزش طلای ۱۸ عیار رو برای هر سناریویی محاسبه کنی.\n\n"
         "مثلاً اگه فکر می‌کنی اونس به ۳۰۰۰ دلار می‌رسه و دلار ۸۰ هزار تومان می‌شه، "
