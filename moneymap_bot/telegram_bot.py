@@ -761,20 +761,27 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def fetch_tgju_price(symbol: str) -> float | None:
     import aiohttp
     url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                # مقدار قیمت در فیلد "p" یا "price" هست
-                rows = data.get("data", [])
-                if rows:
-                    raw = rows[0][3]  # ستون چهارم = قیمت پایانی/لحظه‌ای (نه کمترین قیمت روز)
-                    price = float(str(raw).replace(",", ""))
-                    return price
-    except Exception as e:
-        logger.error(f"خطا در دریافت قیمت {symbol}: {e}")
+    # سه بار تلاش با timeout بیشتر
+    for attempt in range(3):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"TGJU {symbol} status {resp.status} (attempt {attempt+1})")
+                        continue
+                    data = await resp.json()
+                    rows = data.get("data", [])
+                    if rows:
+                        raw = rows[0][3]
+                        price = float(str(raw).replace(",", ""))
+                        return price
+        except asyncio.TimeoutError:
+            logger.warning(f"TGJU timeout for {symbol} (attempt {attempt+1}/3)")
+            if attempt < 2:
+                await asyncio.sleep(2)
+        except Exception as e:
+            logger.error(f"خطا در دریافت قیمت {symbol}: {e}")
+            break
     return None
 
 
