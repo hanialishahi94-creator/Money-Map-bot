@@ -783,6 +783,8 @@ async def fetch_tgju_price(symbol: str) -> float | None:
                     if rows:
                         raw = rows[0][3]
                         price = float(str(raw).replace(",", ""))
+                        # لاگ کامل ردیف خام برای عیب‌یابی (اگه TGJU خودش دیتای قدیمی برگردونه، این لاگ روی Railway قابل بررسیه)
+                        logger.info(f"TGJU {symbol} raw row: {rows[0]}")
                         return price
         except asyncio.TimeoutError:
             logger.warning(f"TGJU timeout for {symbol} (attempt {attempt+1}/3)")
@@ -792,6 +794,84 @@ async def fetch_tgju_price(symbol: str) -> float | None:
             logger.error(f"خطا در دریافت قیمت {symbol}: {e}")
             break
     return None
+
+
+async def fetch_live_ounce_price_usd() -> float | None:
+    """
+    قیمت لحظه‌ای اونس جهانی طلا به دلار.
+    منبع اصلی: PAXG (توکن کریپتوی پشتوانه‌دار طلای فیزیکی، هر توکن = دقیقاً ۱ اونس تروی طلا)
+    که ۲۴/۷ توی صرافی‌های کریپتو معامله می‌شه و برخلاف شاخص 'ons' توی TGJU (که به نظر می‌رسه
+    فقط توی ساعات بازار جهانی/داخلی آپدیت می‌شه و آخر هفته‌ها یا گاهی برای ساعت‌ها ثابت می‌مونه)،
+    قیمتش همیشه زنده و در حال تغییره.
+    اگه این منبع در دسترس نبود، به‌صورت fallback از TGJU (نماد 'ons') استفاده می‌کنیم.
+    """
+    import aiohttp
+    url = "https://api.coingecko.com/api/v3/simple/price?ids=pax-gold&vs_currencies=usd"
+    for attempt in range(2):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        price = data.get("pax-gold", {}).get("usd")
+                        if price:
+                            logger.info(f"PAXG live ounce price: {price}")
+                            return float(price)
+                    else:
+                        logger.warning(f"CoinGecko PAXG status {resp.status} (attempt {attempt+1})")
+        except Exception as e:
+            logger.warning(f"خطا در دریافت قیمت PAXG (attempt {attempt+1}): {e}")
+        await asyncio.sleep(1)
+
+    # fallback: منبع اصلی در دسترس نبود، از TGJU استفاده کن
+    logger.warning("PAXG unavailable, falling back to TGJU 'ons'")
+    return await fetch_tgju_price("ons")
+
+
+async def fetch_tgju_homepage_price(li_id: str) -> float | None:
+    """
+    قیمت لحظه‌ای رو مستقیم از باکس‌های بالای صفحه‌ی اصلی tgju.org می‌خونه
+    (همون HTML که سمت سرور رندر شده و توی مرورگر لحظه‌ای و درست دیده می‌شه)،
+    برخلاف اندپوینت summary-table-data که مشخص شد یه جدول تاریخی روزانه‌ست
+    و ردیف اولش معمولاً مال روز/روزهای قبله، نه همین الان.
+
+    li_id نمونه: 'l-price_dollar_rl' (دلار), 'l-ons' (اونس جهانی), 'l-geram18' (طلای ۱۸ داخلی)
+    """
+    import aiohttp
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+    }
+    url = "https://www.tgju.org/"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    logger.warning(f"TGJU homepage status {resp.status}")
+                    return None
+                html = await resp.text()
+    except Exception as e:
+        logger.error(f"خطا در دریافت صفحه‌ی اصلی TGJU: {e}")
+        return None
+
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        li = soup.find("li", id=li_id)
+        if not li:
+            logger.warning(f"TGJU homepage: li#{li_id} پیدا نشد (شاید ساختار سایت عوض شده)")
+            return None
+        price_span = li.find("span", class_="info-price")
+        if not price_span:
+            logger.warning(f"TGJU homepage: span.info-price توی li#{li_id} پیدا نشد")
+            return None
+        raw = price_span.get_text(strip=True)
+        price = float(raw.replace(",", ""))
+        logger.info(f"TGJU homepage {li_id}: {price}")
+        return price
+    except Exception as e:
+        logger.error(f"خطا در پارس صفحه‌ی اصلی TGJU برای {li_id}: {e}")
+        return None
 
 
 def calc_gold18(ounce_usd: float, dollar_toman: float) -> tuple[float, float]:
@@ -841,13 +921,24 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import time
     query = update.callback_query
     await query.answer()
     await query.message.reply_text("⏳ در حال دریافت قیمت‌های لحظه‌ای ...")
 
-    ounce = await fetch_tgju_price("ons")
-    dollar = await fetch_tgju_price("price_dollar_rl")
-    market_price_rial = await fetch_tgju_price("geram18")
+    # منبع اصلی: باکس‌های لحظه‌ای بالای صفحه‌ی اصلی tgju.org (HTML رندرشده‌ی سمت سرور)
+    # چون مشخص شد اندپوینت summary-table-data یه جدول تاریخی روزانه‌ست، نه لحظه‌ای.
+    ounce = await fetch_tgju_homepage_price("l-ons")
+    dollar = await fetch_tgju_homepage_price("l-price_dollar_rl")
+    market_price_rial = await fetch_tgju_homepage_price("l-geram18")
+
+    # fallback‌ها اگه ساختار صفحه عوض شده بود یا اسکرِیپ شکست خورد
+    if not ounce:
+        ounce = await fetch_live_ounce_price_usd()
+    if not dollar:
+        dollar = await fetch_tgju_price("price_dollar_rl")
+    if not market_price_rial:
+        market_price_rial = await fetch_tgju_price("geram18")
 
     if not ounce or not dollar:
         await query.message.reply_text(
@@ -855,8 +946,36 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MAIN_MENU
 
+    # بررسی «منجمد بودن» قیمت اونس: اگه TGJU خودش عدد رو برای چند ساعت آپدیت نکرده باشه
+    # (مثلاً به خاطر مشکل داخلی خودشون در آپدیت این شاخص خاص)، اینجا تشخیص می‌دیم و به کاربر هشدار می‌دیم.
+    now = time.time()
+    last_ounce = db.get_setting("last_ounce_price")
+    last_ounce_ts = db.get_setting("last_ounce_ts")
+    stale_hours = None
+    if last_ounce is not None and last_ounce_ts is not None:
+        try:
+            if abs(float(last_ounce) - ounce) < 0.005:
+                stale_hours = (now - float(last_ounce_ts)) / 3600
+            else:
+                db.set_setting("last_ounce_price", ounce)
+                db.set_setting("last_ounce_ts", now)
+        except (TypeError, ValueError):
+            db.set_setting("last_ounce_price", ounce)
+            db.set_setting("last_ounce_ts", now)
+    else:
+        db.set_setting("last_ounce_price", ounce)
+        db.set_setting("last_ounce_ts", now)
+
     dollar_toman = dollar / 10
     market_price_toman = (market_price_rial / 10) if market_price_rial else None
+
+    result_text = gold_result_text(ounce, dollar_toman, "لحظه‌ای", market_price_toman)
+    if stale_hours is not None and stale_hours > 2:
+        result_text += (
+            f"\n\n⚠️ توجه: قیمت اونس جهانی حدود {stale_hours:.1f} ساعته تغییر نکرده — "
+            "احتمال داره منبع (TGJU) این عدد رو به‌روزرسانی نکرده باشه. "
+            "برای اطمینان، قیمت لحظه‌ای اونس رو از یه منبع دیگه هم چک کن."
+        )
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 بروزرسانی مجدد", callback_data="gold_live")],
@@ -864,7 +983,7 @@ async def gold_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")],
     ])
     await query.message.reply_text(
-        gold_result_text(ounce, dollar_toman, "لحظه‌ای", market_price_toman),
+        result_text,
         reply_markup=keyboard,
     )
     return MAIN_MENU
