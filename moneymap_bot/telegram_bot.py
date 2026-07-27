@@ -760,12 +760,21 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== گرفتن قیمت لحظه‌ای از tgju =====
 async def fetch_tgju_price(symbol: str) -> float | None:
     import aiohttp
-    url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}"
+    import time
+    # پارامتر _ (تایم‌استمپ لحظه‌ای) برای رد کردن کش CDN/پراکسی که باعث می‌شد
+    # همیشه یک عدد قدیمی/ثابت برگرده حتی وقتی قیمت واقعی توی خود سایت tgju.org آپدیت شده بود.
+    cache_bust = int(time.time() * 1000)
+    url = f"https://api.tgju.org/v1/market/indicator/summary-table-data/{symbol}?_={cache_bust}"
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    }
     # سه بار تلاش با timeout بیشتر
     for attempt in range(3):
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
                         logger.warning(f"TGJU {symbol} status {resp.status} (attempt {attempt+1})")
                         continue
