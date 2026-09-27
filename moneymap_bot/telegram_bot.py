@@ -1524,14 +1524,16 @@ async def _fetch_gold_bubble() -> list | None:
 
 async def _fetch_silver_bubble() -> list | None:
     """
-    حباب نقره از TradersArena
-    فرمت: آرایه‌ای از آرایه‌ها
-    index 1 = نام فارسی، index 15 = حباب کل
+    حباب نقره از TradersArena.
+    سایت در تیر ۱۴۰۵ ساختار API‌اش رو عوض کرد: مسیر قدیمی
+    /data/industries-stocks-csv/silver-funds حذف شده (۴۰۴ می‌ده) و الان
+    باید از /data/industries/silver-funds/snapshot که یک JSON تودرتو
+    (rows[].static.identity.name و rows[].live.fund.bubblePercent) برمی‌گردونه استفاده کرد.
     """
     import aiohttp
     import time
 
-    url = f"https://tradersarena.ir/data/industries-stocks-csv/silver-funds?_={int(time.time()*1000)}"
+    url = f"https://tradersarena.ir/data/industries/silver-funds/snapshot?timeframe=12&_={int(time.time()*1000)}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://tradersarena.ir/industries/silver-funds",
@@ -1548,30 +1550,36 @@ async def _fetch_silver_bubble() -> list | None:
                 if resp.status != 200:
                     logger.error(f"silver error: {await resp.text()}")
                     return None
-                rows = await resp.json(content_type=None)
+                data = await resp.json(content_type=None)
 
-        logger.info(f"silver rows count: {len(rows) if rows else 0}")
+        rows = (data or {}).get("rows") or []
+        logger.info(f"silver rows count: {len(rows)}")
 
         funds = []
         seen = set()
         for row in rows:
-            if not isinstance(row, list) or len(row) < 16:
+            if not isinstance(row, dict):
                 continue
-            name = str(row[1]) if row[1] else ""
+            identity = ((row.get("static") or {}).get("identity")) or {}
+            name = identity.get("name") or row.get("symbol") or ""
             if not name or name in seen:
                 continue
             seen.add(name)
-            try:
-                bubble = float(row[15]) if row[15] is not None else None
-                if bubble is None:
-                    continue
-            except Exception:
+
+            live = row.get("live") or {}
+            fund_live = live.get("fund") or {}
+            bubble = fund_live.get("bubblePercent")
+            if bubble is None:
                 continue
+
+            price = ((live.get("market") or {}).get("prices") or {}).get("closing")
+            nav = fund_live.get("currentNav")
+
             funds.append({
                 "name": name,
-                "price": str(row[8]) if len(row) > 8 else "—",
-                "bubble_price": str(row[5]) if len(row) > 5 else "—",
-                "bubble_intrinsic": str(row[14]) if len(row) > 14 else "—",
+                "price": str(price) if price is not None else "—",
+                "bubble_price": str(price) if price is not None else "—",
+                "bubble_intrinsic": str(nav) if nav is not None else "—",
                 "bubble_total": str(bubble),
             })
 
