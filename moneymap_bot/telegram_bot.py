@@ -1561,7 +1561,10 @@ async def _fetch_silver_bubble() -> list | None:
             if not isinstance(row, dict):
                 continue
             identity = ((row.get("static") or {}).get("identity")) or {}
-            name = identity.get("name") or row.get("symbol") or ""
+            # نماد معاملاتی (مثل نقرین/سیمین/سیلور) رو ترجیح می‌دیم چون
+            # اسم رسمی صندوق‌ها معمولاً کلمه‌ی «کالا»ست نه «نقره» و برای
+            # کاربر ناشناس به نظر می‌رسه، هرچند همه واقعاً صندوق نقره‌اند.
+            name = row.get("symbol") or identity.get("name") or ""
             if not name or name in seen:
                 continue
             seen.add(name)
