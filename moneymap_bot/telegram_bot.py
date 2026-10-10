@@ -2926,8 +2926,61 @@ async def cmd_reels_scout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in (REELS_SCOUT_CHAT_ID, ADMIN_GROUP_ID, SUPPORT_GROUP_ID, CONTENT_GROUP_ID):
         return
-    await update.message.reply_text("🔎 در حال گشتن اکسپلور و هشتگ‌ها... (۱-۲ دقیقه)")
+    await update.message.reply_text("🔎 در حال گشتن پیج‌های مرجع و هشتگ‌ها... (۱-۲ دقیقه)")
     await reels_scout_job(context, chat_id=chat_id)
+
+
+def _is_reels_admin_chat(update: Update) -> bool:
+    return update.effective_chat.id in (REELS_SCOUT_CHAT_ID, ADMIN_GROUP_ID, SUPPORT_GROUP_ID, CONTENT_GROUP_ID)
+
+
+async def cmd_reels_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /pages — لیست پیج‌های مرجع گزارش ریلز."""
+    if not _is_reels_admin_chat(update):
+        return
+    import reels_scout
+    pages = reels_scout.reference_pages()
+    lines = "\n".join(f"{i}. instagram.com/{p}" for i, p in enumerate(pages, 1)) or "— خالیه —"
+    await update.message.reply_text(
+        f"📋 پیج‌های مرجع ({len(pages)}):\n{lines}\n\n"
+        "➕ اضافه: /addpage لینک یا یوزرنیم\n➖ حذف: /delpage یوزرنیم",
+        disable_web_page_preview=True,
+    )
+
+
+async def cmd_reels_addpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /addpage — اضافه کردن یک یا چند پیج مرجع (لینک یا یوزرنیم)."""
+    if not _is_reels_admin_chat(update):
+        return
+    import reels_scout
+    if not context.args:
+        await update.message.reply_text("لینک یا یوزرنیم پیج رو بعد از دستور بفرست، مثلاً:\n/addpage https://instagram.com/golabi.economy")
+        return
+    results = []
+    for arg in context.args:
+        page, added = reels_scout.add_reference_page(arg)
+        if not page:
+            results.append(f"❌ {arg} — لینک/یوزرنیم معتبر نیست")
+        elif added:
+            results.append(f"✅ {page} اضافه شد")
+        else:
+            results.append(f"ℹ️ {page} از قبل توی لیست بود")
+    await update.message.reply_text("\n".join(results) + f"\n\nکل پیج‌ها: {len(reels_scout.reference_pages())} — /pages")
+
+
+async def cmd_reels_delpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /delpage — حذف پیج مرجع."""
+    if not _is_reels_admin_chat(update):
+        return
+    import reels_scout
+    if not context.args:
+        await update.message.reply_text("یوزرنیم پیج رو بعد از دستور بفرست، مثلاً:\n/delpage golabi.economy")
+        return
+    results = []
+    for arg in context.args:
+        page, removed = reels_scout.remove_reference_page(arg)
+        results.append(f"🗑 {page} حذف شد" if removed else f"ℹ️ {page or arg} توی لیست نبود")
+    await update.message.reply_text("\n".join(results) + f"\n\nکل پیج‌ها: {len(reels_scout.reference_pages())} — /pages")
 
 
 async def cmd_trigger_ai_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3274,6 +3327,9 @@ def main():
     # AI Analysis handlers
     app.add_handler(CommandHandler("ai", cmd_trigger_ai_analysis))
     app.add_handler(CommandHandler("reels", cmd_reels_scout))
+    app.add_handler(CommandHandler("pages", cmd_reels_pages))
+    app.add_handler(CommandHandler("addpage", cmd_reels_addpage))
+    app.add_handler(CommandHandler("delpage", cmd_reels_delpage))
     app.add_handler(CallbackQueryHandler(ai_approve_callback, pattern=r"^ai_approve:"))
     app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
     # این handler باید با group=-1 ثبت بشه تا قبل از ConversationHandler اجرا بشه

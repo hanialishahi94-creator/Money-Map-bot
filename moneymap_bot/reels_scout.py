@@ -1,14 +1,16 @@
 """
-reels_scout.py — شکار موضوع‌های داغ ریلز مالی از اینستاگرام (اکسپلور + هشتگ‌های فارسی)
+reels_scout.py — شکار موضوع‌های داغ ریلز مالی از اینستاگرام (پیج‌های مرجع + هشتگ‌های فارسی)
 
 هر بار اجرا:
-  ۱) ریلزهای اکسپلور و چند هشتگ مالی فارسی رو از اینستاگرام می‌گیره (با sessionid یک اکانت لاگین‌شده)
-  ۲) فقط ریلزهای فارسی، کوتاه (≤ ۶۵ ثانیه)، تازه و پربازدید رو نگه می‌داره
+  ۱) ریلزهای اخیر پیج‌های مرجع (هم‌سبک پیج خودمون) و چند هشتگ مالی فارسی رو می‌گیره (با sessionid)
+  ۲) ریلزهایی از پیج‌های مرجع که خیلی بیشتر از میانگین همون پیج دیده شدن = موضوع داغ؛
+     از هشتگ‌ها فقط ریلزهای فارسی، کوتاه (≤ ۶۵ ثانیه)، تازه و پربازدید
   ۳) با Groq موضوع‌های داغ رو دسته‌بندی می‌کنه و برای هر کدوم ایده‌ی ریلز ۶۰ ثانیه‌ای می‌نویسه
   ۴) خروجی = لیست پیام‌های تلگرام (HTML) با لینک ریلزهای نمونه‌ی ایرانی
 
 متغیرهای محیطی:
   IG_SESSIONID   — کوکی sessionid اکانت اینستاگرام (ترجیحاً یک اکانت فرعی، نه اکانت اصلی)
+  REFERENCE_PAGES — (اختیاری) یوزرنیم پیج‌های مرجع، جدا با کاما — پیش‌فرض: REFERENCE_PAGES_DEFAULT
   IG_PROXY       — (اختیاری) پراکسی، مثلاً http://user:pass@host:port — IP سرورها معمولاً توسط اینستا محدود می‌شه
 """
 import os
@@ -30,18 +32,21 @@ HASHTAGS = [
     "طلا", "دلار", "بورس", "ارز_دیجیتال", "بیت_کوین", "سرمایه_گذاری",
     "ترید", "اقتصاد", "سکه", "بازار_مالی", "فارکس", "پول", "سواد_مالی", "کریپتو",
 ]
-HASHTAGS_PER_RUN = 5          # برای کم کردن ریسک بلاک، هر بار فقط چند هشتگ (چرخشی)
+HASHTAGS_PER_RUN = 3          # برای کم کردن ریسک بلاک، هر بار فقط چند هشتگ (چرخشی)
+REFERENCE_PAGES_DEFAULT = ["lurax.news", "golabi.economy", "vilifinance", "mikofinance"]
+TOP_REFERENCE = 15            # چندتا از ریلزهای پیج‌های مرجع به AI داده بشه
+TOP_HASHTAG = 10              # چندتا از ریلزهای هشتگ‌ها
 MAX_DURATION = 65             # ثانیه
 MAX_AGE_DAYS = 7
-TOP_CANDIDATES = 25
 SENT_KEY = "reels_scout_sent"
 ROTATION_KEY = "reels_scout_rotation"
 
-FINANCE_KEYWORDS = [
-    "طلا", "دلار", "بورس", "سکه", "ارز", "بیت", "کریپتو", "سرمایه", "ترید", "اقتصاد",
-    "تورم", "پول", "سهام", "فارکس", "بازار", "نرخ", "قیمت", "پس‌انداز", "پس انداز", "درآمد",
-    "مالی", "بانک", "وام", "مسکن", "خودرو", "اونس", "تتر", "صرافی",
-]
+STYLE = (
+    "پیج‌های اخبار و توضیح ساده‌ی اقتصاد و پول برای مخاطب عام ایرانی — مثل @lurax.news، @golabi.economy، "
+    "@vilifinance و @mikofinance: خبر اقتصادی روز با زبان ساده، چرا قیمت دلار/طلا/سکه/مسکن/خودرو تغییر کرد، "
+    "تورم و قدرت خرید، تحریم و سیاست روی اقتصاد، بورس و کریپتو به زبان ساده، سواد مالی و مدیریت پول شخصی، "
+    "داستان‌های جذاب اقتصادی و برندها"
+)
 
 _PERSIAN_RE = re.compile(r"[؀-ۿ]")
 IG_APP_ID = "936619743392459"  # app-id نسخه‌ی وب اینستاگرام
@@ -112,6 +117,21 @@ def _walk_medias(node, out: list):
         if node.get("code") and "media_type" in node and "taken_at" in node:
             out.append(node)
             return
+        if node.get("shortcode") and "taken_at_timestamp" in node:   # فرمت GraphQL (پروفایل وب)
+            likes = (node.get("edge_liked_by") or node.get("edge_media_preview_like") or {}).get("count", 0)
+            cap_edges = (node.get("edge_media_to_caption") or {}).get("edges") or []
+            out.append({
+                "code": node["shortcode"],
+                "media_type": 2 if node.get("is_video") else 1,
+                "taken_at": node["taken_at_timestamp"],
+                "video_duration": node.get("video_duration") or 0,
+                "play_count": node.get("video_view_count") or 0,
+                "like_count": likes,
+                "comment_count": (node.get("edge_media_to_comment") or {}).get("count", 0),
+                "caption": {"text": cap_edges[0]["node"]["text"] if cap_edges else ""},
+                "user": {"username": (node.get("owner") or {}).get("username", "")},
+            })
+            return
         for v in node.values():
             _walk_medias(v, out)
     elif isinstance(node, list):
@@ -139,24 +159,70 @@ def _fetch_hashtag(client, tag: str) -> list[dict]:
     return medias
 
 
+PAGES_KEY = "reels_scout_pages"
+
+
+def normalize_page(text: str) -> str:
+    """لینک کامل اینستا، ‎@یوزرنیم یا یوزرنیم خالی → یوزرنیم تمیز."""
+    text = text.strip()
+    text = re.sub(r"^(https?://)?(www\.)?instagram\.com/", "", text, flags=re.I)
+    text = text.split("?")[0].split("/")[0].strip("@ ").lower()
+    return text if re.fullmatch(r"[a-z0-9._]{1,30}", text) else ""
+
+
+def reference_pages() -> list[str]:
+    """لیست پیج‌های مرجع: اول از دیتابیس (قابل تغییر از تلگرام)، بعد env، بعد پیش‌فرض."""
+    stored = db.get_setting(PAGES_KEY)
+    if stored is not None:
+        return json.loads(stored)
+    raw = os.getenv("REFERENCE_PAGES", "").strip()
+    pages = [p for p in re.split(r"[,\s]+", raw) if p] if raw else REFERENCE_PAGES_DEFAULT
+    return [p for p in (normalize_page(x) for x in pages) if p]
+
+
+def add_reference_page(text: str) -> tuple[str, bool]:
+    """(یوزرنیم، اضافه شد؟) — یوزرنیم خالی یعنی ورودی نامعتبر بود."""
+    page = normalize_page(text)
+    pages = reference_pages()
+    if not page or page in pages:
+        return page, False
+    db.set_setting(PAGES_KEY, json.dumps(pages + [page]))
+    return page, True
+
+
+def remove_reference_page(text: str) -> tuple[str, bool]:
+    page = normalize_page(text)
+    pages = reference_pages()
+    if page not in pages:
+        return page, False
+    db.set_setting(PAGES_KEY, json.dumps([p for p in pages if p != page]))
+    return page, True
+
+
+def _fetch_page(client, username: str) -> list[dict]:
+    """آخرین پست‌های یک پیج + نسبت بازدید هر ریلز به میانه‌ی بازدید همون پیج."""
+    data = _get_json(client, "/api/v1/users/web_profile_info/", {"username": username})
+    medias = []
+    _walk_medias(data, medias)
+    views = sorted(_views(m) for m in medias if m.get("media_type") == 2 and _views(m))
+    median = views[len(views) // 2] if views else 0
+    for m in medias:
+        user = m.get("user") or {}
+        user["username"] = user.get("username") or username
+        m["user"] = user
+        m["_ratio"] = round(_views(m) / median, 1) if median else 0
+    return medias
+
+
 def _collect_medias() -> list:
-    """جمع‌آوری ریلز از اکسپلور و هشتگ‌ها (sync — داخل thread اجرا می‌شه)."""
+    """جمع‌آوری ریلز از پیج‌های مرجع و هشتگ‌ها (sync — داخل thread اجرا می‌شه)."""
     medias, errors, ok = [], [], 0
     with _http_client() as client:
-        sources = [("explore", None)] + [(f"#{t}", t) for t in _next_hashtags()]
-        for source, tag in sources:
+        sources = [(f"@{p}", "page", p) for p in reference_pages()] + \
+                  [(f"#{t}", "tag", t) for t in _next_hashtags()]
+        for source, kind, name in sources:
             try:
-                if tag is None:
-                    data = _get_json(client, "/api/v1/discover/web/explore_grid/", {
-                        "is_nonpersonalized_explore": "false",
-                        "include_fixed_destinations": "true",
-                        "is_prefetch": "false",
-                        "omit_cover_media": "false",
-                    })
-                    found = []
-                    _walk_medias(data, found)
-                else:
-                    found = _fetch_hashtag(client, tag)
+                found = _fetch_page(client, name) if kind == "page" else _fetch_hashtag(client, name)
                 ok += 1
                 medias += [(m, source) for m in found]
                 logger.info(f"reels_scout {source}: {len(found)} media")
@@ -170,10 +236,6 @@ def _collect_medias() -> list:
             "\n\nاحتمالاً sessionid منقضی شده یا اینستا IP سرور رو بلاک کرده (راه‌حل: sessionid تازه یا IG_PROXY)."
         )
     return medias
-
-
-def _is_finance(caption: str) -> bool:
-    return any(k in caption for k in FINANCE_KEYWORDS)
 
 
 def _views(m: dict) -> int:
@@ -207,8 +269,6 @@ def _filter_candidates(raw: list) -> list[dict]:
             continue
         if not _PERSIAN_RE.search(caption):
             continue
-        if source == "explore" and not _is_finance(caption):
-            continue
         seen.add(code)
         out.append({
             "code": code,
@@ -220,10 +280,13 @@ def _filter_candidates(raw: list) -> list[dict]:
             "duration": round(duration),
             "caption": caption[:400],
             "source": source,
+            "ratio": m.get("_ratio", 0),
             "score": _score(m),
         })
-    out.sort(key=lambda c: c["score"], reverse=True)
-    return out[:TOP_CANDIDATES]
+    # پیج‌های مرجع: اونایی که نسبت به میانگین خود پیج بیشتر ترکوندن؛ هشتگ‌ها: سرعت بازدید
+    refs = sorted((c for c in out if c["source"].startswith("@")), key=lambda c: c["ratio"], reverse=True)
+    tags = sorted((c for c in out if c["source"].startswith("#")), key=lambda c: c["score"], reverse=True)
+    return refs[:TOP_REFERENCE] + tags[:TOP_HASHTAG]
 
 
 def _remember_sent(codes: list[str]):
@@ -236,19 +299,22 @@ def _remember_sent(codes: list[str]):
 
 async def _analyze(candidates: list[dict]) -> list[dict]:
     listing = "\n".join(
-        f"[{i}] بازدید:{c['views']} لایک:{c['likes']} کامنت:{c['comments']} مدت:{c['duration']}ث منبع:{c['source']}\n"
-        f"کپشن: {c['caption'].replace(chr(10), ' ')}"
+        f"[{i}] منبع:{c['source']} بازدید:{c['views']} لایک:{c['likes']} کامنت:{c['comments']} مدت:{c['duration']}ث"
+        + (f" — {c['ratio']} برابر میانگین بازدید همین پیج" if c["ratio"] else "")
+        + f"\nکپشن: {c['caption'].replace(chr(10), ' ')}"
         for i, c in enumerate(candidates)
     )
-    prompt = f"""تو استراتژیست محتوای اینستاگرام برای یک پیج آموزش و تحلیل بازارهای مالی ایران (طلا، دلار، سکه، بورس، کریپتو) هستی.
+    prompt = f"""تو استراتژیست محتوای اینستاگرام برای پیج Money MAP هستی. سبک پیج:
+{STYLE}
 
-این‌ها ریلزهای فارسی پربازدید و تازه‌ی همین روزها از اکسپلور و هشتگ‌های مالی هستن:
+این‌ها ریلزهای تازه‌ی همین روزها هستن. اونایی که منبعشون @ هست از پیج‌های هم‌سبک ما هستن و «برابر میانگین» یعنی نسبت به بقیه‌ی ریلزهای همون پیج چقدر بیشتر دیده شده (بالاتر = موضوع داغ‌تر). اونایی که منبعشون # هست از هشتگ‌ها هستن و ممکنه پرت باشن:
 
 {listing}
 
 کار تو:
-۱) از بینشون ۳ تا ۵ «موضوع داغ» دربیار که بشه باهاش یک ریلز حداکثر ۶۰ ثانیه‌ای خفن و وایرال ساخت.
-۲) برای هر موضوع بنویس: چرا الان داغه، یک هوک ۳ ثانیه‌ی اول (جمله‌ی دقیق)، ساختار کوتاه ریلز، و شماره‌ی ریلزهای نمونه از لیست بالا (۱ تا ۳ تا).
+۱) هر ریلزی که به سبک پیج ما نمی‌خوره رو کامل نادیده بگیر: انگیزشی و موفقیت، فروش دوره/سیگنال/پامپ، تبلیغ صرافی، لایف‌استایل، طنز بی‌ربط، آموزش تخصصی تحلیل تکنیکال.
+۲) از بقیه ۳ تا ۵ «موضوع داغ» دربیار که بشه باهاش یک ریلز حداکثر ۶۰ ثانیه‌ای خفن به سبک این پیج‌ها ساخت. اولویت با موضوع‌هایی که در پیج‌های مرجع چند برابر میانگین دیده شدن.
+۳) برای هر موضوع بنویس: چرا الان داغه، یک هوک ۳ ثانیه‌ی اول (جمله‌ی دقیق)، ساختار کوتاه ریلز، و شماره‌ی ریلزهای نمونه از لیست بالا (۱ تا ۳ تا، فقط مرتبط‌ها).
 
 فقط و فقط یک JSON معتبر برگردون، بدون هیچ متن اضافه، با این ساختار:
 {{"topics": [{{"title": "...", "why": "...", "hook": "...", "outline": "...", "examples": [0, 3]}}]}}"""
@@ -303,6 +369,8 @@ def _fmt_num(n: int) -> str:
 
 def _example_line(c: dict) -> str:
     stats = f"👁 {_fmt_num(c['views'])}" if c["views"] else f"❤️ {_fmt_num(c['likes'])}"
+    if c.get("ratio", 0) >= 1.5:
+        stats += f" · 🚀 {c['ratio']}x میانگین پیج"
     return f"▫️ <a href=\"{c['url']}\">@{html.escape(c['user'])}</a> — {stats} · {c['duration']}ث"
 
 
@@ -310,7 +378,7 @@ def _build_messages(topics: list[dict], candidates: list[dict]) -> tuple[list[st
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3, minutes=30)))
     messages = [
         f"🎬 <b>موضوع‌های داغ ریلز مالی</b>\n🕘 {now.strftime('%Y/%m/%d — %H:%M')}\n"
-        f"از {len(candidates)} ریلز پربازدید فارسی اکسپلور و هشتگ‌ها"
+        f"از {len(candidates)} ریلز تازه‌ی پیج‌های مرجع و هشتگ‌ها"
     ]
     used = []
     for i, t in enumerate(topics, 1):
