@@ -22,6 +22,8 @@ VIP_CARD_OWNER = "هانیه علیشاهی"
 VIP_DAYS = 30  # مقدار پیش‌فرض — مقدار واقعی از طریق db.get_vip_days() و پنل ادمین قابل تغییر است
 VIP_CHANNEL_ID = -1003794396104  # آیدی کانال خصوصی VIP
 CONTENT_GROUP_ID = int(os.getenv("CONTENT_GROUP_ID", "0"))  # آیدی گروه تایید محتوا (برای ارسال سیگنال)
+REELS_SCOUT_CHAT_ID = int(os.getenv("REELS_SCOUT_CHAT_ID", str(ADMIN_GROUP_ID)))  # چتی که گزارش موضوع‌های داغ ریلز براش ارسال می‌شه
+REELS_SCOUT_HOURS = os.getenv("REELS_SCOUT_HOURS", "9,15,21")  # ساعت‌های ارسال گزارش ریلز (وقت تهران)
 
 
 CAR_PRICE_LIST = [
@@ -2897,6 +2899,35 @@ async def sig_edit_text_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ===== تحلیل روزانه AI =====
 
+async def reels_scout_job(context: ContextTypes.DEFAULT_TYPE, chat_id: int | None = None):
+    """جاب چندبار در روز — موضوع‌های داغ ریلز مالی از اکسپلور/هشتگ‌های اینستا + لینک نمونه‌های ایرانی."""
+    import reels_scout
+    chat_id = chat_id or REELS_SCOUT_CHAT_ID
+    try:
+        messages = await reels_scout.scout()
+    except Exception as e:
+        logger.error(f"reels_scout failed: {e}")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⚠️ گزارش ریلز ناموفق بود:\n{e}\n\n(اگه خطای لاگین/sessionid بود، IG_SESSIONID رو روی سرور تمدید کن.)",
+        )
+        return
+    for msg in messages:
+        await context.bot.send_message(
+            chat_id=chat_id, text=msg, parse_mode="HTML", disable_web_page_preview=True,
+        )
+        await asyncio.sleep(1)
+
+
+async def cmd_reels_scout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /reels — اجرای دستی گزارش موضوع‌های داغ ریلز."""
+    chat_id = update.effective_chat.id
+    if chat_id not in (REELS_SCOUT_CHAT_ID, ADMIN_GROUP_ID, SUPPORT_GROUP_ID, CONTENT_GROUP_ID):
+        return
+    await update.message.reply_text("🔎 در حال گشتن اکسپلور و هشتگ‌ها... (۱-۲ دقیقه)")
+    await reels_scout_job(context, chat_id=chat_id)
+
+
 async def cmd_trigger_ai_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور /ai — تریگر دستی تحلیل همین الان (فقط در گروه پشتیبانی)."""
     if update.effective_chat.id != SUPPORT_GROUP_ID:
@@ -3240,6 +3271,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.PHOTO, handle_non_photo_while_waiting_receipt))
     # AI Analysis handlers
     app.add_handler(CommandHandler("ai", cmd_trigger_ai_analysis))
+    app.add_handler(CommandHandler("reels", cmd_reels_scout))
     app.add_handler(CallbackQueryHandler(ai_approve_callback, pattern=r"^ai_approve:"))
     app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
     # این handler باید با group=-1 ثبت بشه تا قبل از ConversationHandler اجرا بشه
@@ -3283,6 +3315,15 @@ def main():
             time=_dt.time(hour=9, minute=0, tzinfo=_tehran),
             name="daily_ai_analysis",
         )
+        # گزارش موضوع‌های داغ ریلز — چند بار در روز
+        if os.getenv("IG_SESSIONID"):
+            for _h in REELS_SCOUT_HOURS.split(","):
+                if _h.strip().isdigit():
+                    app.job_queue.run_daily(
+                        reels_scout_job,
+                        time=_dt.time(hour=int(_h), minute=0, tzinfo=_tehran),
+                        name=f"reels_scout_{_h.strip()}",
+                    )
     else:
         logger.warning("job_queue فعال نیست")
     logger.info("✅ ربات در حال اجراست...")
