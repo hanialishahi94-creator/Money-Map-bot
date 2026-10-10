@@ -443,9 +443,11 @@ def _shortcode_to_pk(shortcode: str) -> int:
 def _reel_owner(shortcode: str) -> str | None:
     """یوزرنیم صاحب ریلز از صفحه‌ی عمومی پست (متای og:description: «... - username on date»)."""
     import httpx
+    proxy = os.getenv("IG_PROXY", "").strip()
     r = httpx.get(
         f"https://www.instagram.com/reel/{shortcode}/", timeout=30, follow_redirects=True,
         headers={"User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"},
+        **({"proxy": proxy} if proxy else {}),
     )
     m = re.search(r'property="og:description"[^>]*content="[^"]*? - ([A-Za-z0-9._]+) on ', r.text) or \
         re.search(r'content="[^"]*? - ([A-Za-z0-9._]+) on [^"]*"[^>]*property="og:description"', r.text)
