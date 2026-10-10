@@ -44,27 +44,75 @@ FINANCE_KEYWORDS = [
 ]
 
 _PERSIAN_RE = re.compile(r"[؀-ۿ]")
-_client = None
+IG_APP_ID = "936619743392459"  # app-id نسخه‌ی وب اینستاگرام
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
 
 
-# ─── اینستاگرام ───────────────────────────────────────────────────────────────
+class InstagramAuthError(RuntimeError):
+    pass
 
-def _get_client():
-    global _client
-    if _client is not None:
-        return _client
+
+# ─── اینستاگرام (API نسخه‌ی وب — همونی که مرورگر استفاده می‌کنه) ──────────────
+
+def _http_client():
+    import httpx
+    import urllib.parse
     sessionid = os.getenv("IG_SESSIONID", "").strip()
     if not sessionid:
         raise RuntimeError("IG_SESSIONID تنظیم نشده")
-    from instagrapi import Client
-    cl = Client()
-    cl.delay_range = [2, 5]
+    sessionid = urllib.parse.unquote(sessionid)
+    cookies = {"sessionid": sessionid}
+    if ":" in sessionid:
+        cookies["ds_user_id"] = sessionid.split(":", 1)[0]
+    kwargs = {}
     proxy = os.getenv("IG_PROXY", "").strip()
     if proxy:
-        cl.set_proxy(proxy)
-    cl.login_by_sessionid(sessionid)
-    _client = cl
-    return cl
+        kwargs["proxy"] = proxy
+    return httpx.Client(
+        base_url="https://www.instagram.com",
+        cookies=cookies,
+        headers={
+            "User-Agent": USER_AGENT,
+            "X-IG-App-ID": IG_APP_ID,
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "*/*",
+            "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": "https://www.instagram.com/",
+        },
+        timeout=30,
+        follow_redirects=False,
+        **kwargs,
+    )
+
+
+def _get_json(client, path: str, params: dict) -> dict:
+    r = client.get(path, params=params)
+    if r.status_code in (301, 302) or r.status_code in (401, 403):
+        raise InstagramAuthError(f"{r.status_code} login_required")
+    r.raise_for_status()
+    try:
+        data = r.json()
+    except ValueError:
+        raise InstagramAuthError("پاسخ JSON نبود (احتمالاً صفحه‌ی لاگین)")
+    if data.get("require_login") or data.get("message") in ("login_required", "checkpoint_required"):
+        raise InstagramAuthError(data.get("message") or "login_required")
+    return data
+
+
+def _walk_medias(node, out: list):
+    """همه‌ی آبجکت‌های مدیا رو از هر ساختار JSON بیرون می‌کشه (مستقل از چیدمان پاسخ اینستا)."""
+    if isinstance(node, dict):
+        if node.get("code") and "media_type" in node and "taken_at" in node:
+            out.append(node)
+            return
+        for v in node.values():
+            _walk_medias(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _walk_medias(v, out)
 
 
 def _next_hashtags() -> list[str]:
@@ -74,24 +122,49 @@ def _next_hashtags() -> list[str]:
     return picked
 
 
+def _fetch_hashtag(client, tag: str) -> list[dict]:
+    try:
+        data = _get_json(client, "/api/v1/tags/web_info/", {"tag_name": tag})
+    except InstagramAuthError:
+        raise
+    except Exception:
+        # endpoint جایگزین (جستجوی وب) اگه web_info جواب نداد
+        data = _get_json(client, "/api/v1/fbsearch/web/top_serp/", {"query": f"#{tag}"})
+    medias = []
+    _walk_medias(data, medias)
+    return medias
+
+
 def _collect_medias() -> list:
     """جمع‌آوری ریلز از اکسپلور و هشتگ‌ها (sync — داخل thread اجرا می‌شه)."""
-    global _client
-    cl = _get_client()
-    medias = []
-    try:
-        medias += [(m, "explore") for m in cl.explore_reels(amount=40)]
-    except Exception as e:
-        logger.warning(f"reels_scout explore: {e}")
-        if "login" in str(e).lower():
-            _client = None
-            raise
-    for tag in _next_hashtags():
-        time.sleep(random.uniform(3, 7))
-        try:
-            medias += [(m, f"#{tag}") for m in cl.hashtag_medias_reels_v1(tag, amount=27)]
-        except Exception as e:
-            logger.warning(f"reels_scout hashtag {tag}: {e}")
+    medias, errors, ok = [], [], 0
+    with _http_client() as client:
+        sources = [("explore", None)] + [(f"#{t}", t) for t in _next_hashtags()]
+        for source, tag in sources:
+            try:
+                if tag is None:
+                    data = _get_json(client, "/api/v1/discover/web/explore_grid/", {
+                        "is_nonpersonalized_explore": "false",
+                        "include_fixed_destinations": "true",
+                        "is_prefetch": "false",
+                        "omit_cover_media": "false",
+                    })
+                    found = []
+                    _walk_medias(data, found)
+                else:
+                    found = _fetch_hashtag(client, tag)
+                ok += 1
+                medias += [(m, source) for m in found]
+                logger.info(f"reels_scout {source}: {len(found)} media")
+            except Exception as e:
+                logger.warning(f"reels_scout {source}: {e}")
+                errors.append(f"{source}: {e}")
+            time.sleep(random.uniform(2, 5))
+    if ok == 0:
+        raise RuntimeError(
+            "اینستاگرام به هیچ درخواستی جواب نداد:\n" + "\n".join(errors[:3]) +
+            "\n\nاحتمالاً sessionid منقضی شده یا اینستا IP سرور رو بلاک کرده (راه‌حل: sessionid تازه یا IG_PROXY)."
+        )
     return medias
 
 
@@ -99,11 +172,15 @@ def _is_finance(caption: str) -> bool:
     return any(k in caption for k in FINANCE_KEYWORDS)
 
 
-def _score(m) -> float:
-    views = m.play_count or m.view_count or 0
+def _views(m: dict) -> int:
+    return int(m.get("play_count") or m.get("ig_play_count") or m.get("view_count") or 0)
+
+
+def _score(m: dict) -> float:
+    views = _views(m)
     if not views:
-        views = (m.like_count or 0) * 30 + (m.comment_count or 0) * 100
-    taken = m.taken_at.timestamp() if m.taken_at else time.time() - MAX_AGE_DAYS * 86400
+        views = int(m.get("like_count") or 0) * 30 + int(m.get("comment_count") or 0) * 100
+    taken = m.get("taken_at") or (time.time() - MAX_AGE_DAYS * 86400)
     age_hours = max((time.time() - taken) / 3600, 6)
     return views / age_hours
 
@@ -113,28 +190,30 @@ def _filter_candidates(raw: list) -> list[dict]:
     now = time.time()
     seen, out = set(), []
     for m, source in raw:
-        caption = m.caption_text or ""
-        if m.code in seen or m.code in sent:
+        code = m.get("code")
+        caption = ((m.get("caption") or {}).get("text") or "") if isinstance(m.get("caption"), dict) else ""
+        if code in seen or code in sent:
             continue
-        if m.media_type != 2:
+        if m.get("media_type") != 2:
             continue
-        if m.video_duration and m.video_duration > MAX_DURATION:
+        duration = m.get("video_duration") or 0
+        if duration and duration > MAX_DURATION:
             continue
-        if m.taken_at and now - m.taken_at.timestamp() > MAX_AGE_DAYS * 86400:
+        if m.get("taken_at") and now - m["taken_at"] > MAX_AGE_DAYS * 86400:
             continue
         if not _PERSIAN_RE.search(caption):
             continue
         if source == "explore" and not _is_finance(caption):
             continue
-        seen.add(m.code)
+        seen.add(code)
         out.append({
-            "code": m.code,
-            "url": f"https://www.instagram.com/reel/{m.code}/",
-            "user": m.user.username if m.user else "",
-            "views": m.play_count or m.view_count or 0,
-            "likes": m.like_count or 0,
-            "comments": m.comment_count or 0,
-            "duration": round(m.video_duration or 0),
+            "code": code,
+            "url": f"https://www.instagram.com/reel/{code}/",
+            "user": (m.get("user") or {}).get("username", ""),
+            "views": _views(m),
+            "likes": int(m.get("like_count") or 0),
+            "comments": int(m.get("comment_count") or 0),
+            "duration": round(duration),
             "caption": caption[:400],
             "source": source,
             "score": _score(m),
@@ -260,7 +339,7 @@ async def scout() -> list[str]:
     raw = await asyncio.to_thread(_collect_medias)
     candidates = _filter_candidates(raw)
     if not candidates:
-        return ["🎬 ریلز مالی تازه‌ی جدیدی پیدا نشد (یا همه قبلاً فرستاده شده بودن)."]
+        return [f"🎬 از {len(raw)} پست دریافتی از اینستاگرام، ریلز مالی فارسیِ تازه‌ی جدیدی پیدا نشد (یا همه قبلاً فرستاده شده بودن)."]
     try:
         topics = await _analyze(candidates)
         messages, used = _build_messages(topics, candidates) if topics else _fallback_messages(candidates)

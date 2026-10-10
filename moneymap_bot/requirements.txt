@@ -15,4 +15,3 @@ matplotlib
 scipy
 numpy
 pandas
-instagrapi
