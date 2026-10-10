@@ -110,107 +110,115 @@ async def transcribe_voice(file_bytes: bytes, filename: str = "voice.ogg") -> st
 
 
 # ─── فراخوانی Groq API ────────────────────────────────────────────────────────
+# Groq مدل‌ها رو مرتب بازنشسته می‌کنه (مثلاً llama-3.3-70b-versatile → 404). به‌جای اسم ثابت،
+# مدل از لیست زنده‌ی /models با این ترتیب ترجیح انتخاب می‌شه و اگه 404 داد دوباره انتخاب می‌شه.
+# با GROQ_MODEL / GROQ_FAST_MODEL هم می‌شه مدل رو دستی ثابت کرد.
 
-async def _call_groq_signal(prompt: str) -> str:
-    """
-    فراخوانی سریع Groq برای بازنویسی سیگنال.
-    از مدل سبک llama-3.1-8b-instant استفاده می‌کنه (rate limit بالاتر، سریع‌تر).
-    """
+GROQ_URL = "https://api.groq.com/openai/v1"
+GROQ_MODEL_PREFS = {
+    "large": ["llama-3.3-70b", "llama-4-maverick", "kimi-k2", "llama-4-scout", "gpt-oss-120b", "qwen3-32b", "gpt-oss-20b"],
+    "fast": ["llama-3.1-8b-instant", "llama-4-scout", "llama-3.3-70b", "llama-4-maverick", "kimi-k2", "gpt-oss-20b", "gpt-oss-120b"],
+}
+_groq_models = {
+    "large": os.getenv("GROQ_MODEL", "").strip() or None,
+    "fast": os.getenv("GROQ_FAST_MODEL", "").strip() or None,
+}
+
+
+class GroqBusyError(RuntimeError):
+    pass
+
+
+async def _pick_groq_model(client, api_key: str, kind: str) -> str:
+    r = await client.get(f"{GROQ_URL}/models", headers={"Authorization": f"Bearer {api_key}"})
+    r.raise_for_status()
+    ids = [m["id"] for m in r.json().get("data", []) if m.get("active", True)]
+    chat = [i for i in ids if not any(x in i.lower() for x in ("whisper", "guard", "tts", "embed", "distil", "prompt", "compound"))]
+    for pref in GROQ_MODEL_PREFS[kind]:
+        for i in chat:
+            if pref in i:
+                return i
+    if not chat:
+        raise RuntimeError("هیچ مدل چتی روی Groq پیدا نشد")
+    return chat[0]
+
+
+async def groq_chat(
+    prompt: str, *, kind: str = "large", max_tokens: int = 2000, temperature: float = 0.65,
+    timeout: int = 90, max_retries: int = 4, base_delay: int = 15, json_mode: bool = False,
+) -> str:
+    """فراخوانی مشترک Groq: انتخاب خودکار مدل، retry برای 429، و تعویض مدل وقتی بازنشسته شده (404).
+    متن خام پاسخ رو برمی‌گردونه؛ در صورت شلوغی GroqBusyError و در بقیه‌ی خطاها exception می‌ده."""
     import httpx
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        return "❌ خطا: کلید GROQ_API_KEY تنظیم نشده."
+        raise RuntimeError("کلید GROQ_API_KEY تنظیم نشده.")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        if not _groq_models[kind]:
+            _groq_models[kind] = await _pick_groq_model(client, api_key, kind)
+            logger.info(f"Groq model ({kind}): {_groq_models[kind]}")
+        attempt, repicked = 0, False
+        while attempt < max_retries:
+            model = _groq_models[kind]
+            body = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            if "gpt-oss" in model:
+                body["reasoning_effort"] = "low"
+            if "qwen3" in model:
+                body["reasoning_format"] = "hidden"
+            if json_mode:
+                body["response_format"] = {"type": "json_object"}
+            response = await client.post(f"{GROQ_URL}/chat/completions", headers=headers, json=body)
 
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.1-8b-instant",   # سبک‌تر، rate limit بالاتر
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 600,
-                    "temperature": 0.4,
-                },
-            )
             if response.status_code == 429:
-                # یه بار با مدل دیگه retry کن
-                await asyncio.sleep(3)
-                response = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "gemma2-9b-it",       # fallback مدل
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 600,
-                        "temperature": 0.4,
-                    },
-                )
+                attempt += 1
+                if attempt >= max_retries:
+                    raise GroqBusyError("سرور AI شلوغه")
+                delay = int(response.headers.get("retry-after", base_delay * attempt))
+                logger.warning(f"Groq 429 — تلاش {attempt}/{max_retries} — صبر {delay}s")
+                await asyncio.sleep(delay)
+                continue
+            if response.status_code == 404 and not repicked:
+                repicked = True
+                _groq_models[kind] = await _pick_groq_model(client, api_key, kind)
+                logger.warning(f"Groq model {model} در دسترس نیست → {_groq_models[kind]}")
+                continue
+            if response.status_code == 400 and json_mode:
+                json_mode = False          # مدل حالت JSON رو پشتیبانی نمی‌کنه
+                continue
             response.raise_for_status()
-            result = response.json()["choices"][0]["message"]["content"]
-            return _clean_ai_output(result)
+            content = response.json()["choices"][0]["message"]["content"] or ""
+            return re.sub(r"<think>.*?</think>", "", content, flags=re.S).strip()
+    raise GroqBusyError("سرور AI شلوغه")
+
+
+async def _call_groq_signal(prompt: str) -> str:
+    """فراخوانی سریع Groq برای بازنویسی سیگنال (مدل سبک، rate limit بالاتر)."""
+    try:
+        result = await groq_chat(prompt, kind="fast", max_tokens=600, temperature=0.4,
+                                 timeout=20, max_retries=2, base_delay=3)
+        return _clean_ai_output(result)
     except Exception as e:
         logger.error(f"_call_groq_signal error: {e}")
         return f"❌ خطا در پردازش: {e}"
 
 
 async def _call_groq(prompt: str, *, timeout: int = 90, max_retries: int = 4, base_delay: int = 15) -> str:
-    """ارسال پرامپت به Groq LLaMA و دریافت پاسخ فارسی پاک — با retry خودکار برای 429."""
-    import httpx
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        logger.error("GROQ_API_KEY تنظیم نشده")
-        return "❌ خطا: کلید GROQ_API_KEY تنظیم نشده."
-
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 2000,
-                        "temperature": 0.65,
-                    },
-                )
-
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get("retry-after", base_delay * (attempt + 1)))
-                    logger.warning(f"Groq 429 — تلاش {attempt + 1}/{max_retries} — صبر {retry_after}s")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_after)
-                        continue
-                    else:
-                        return "❌ سرور AI شلوغه، چند دقیقه دیگه دوباره امتحان کن."
-
-                response.raise_for_status()
-                result = response.json()["choices"][0]["message"]["content"]
-                return _clean_ai_output(result)
-
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429 and attempt < max_retries - 1:
-                delay = base_delay * (attempt + 1)
-                logger.warning(f"Groq 429 HTTPStatusError — صبر {delay}s")
-                await asyncio.sleep(delay)
-                continue
-            logger.error(f"خطا در فراخوانی Groq: {e}")
-            return f"❌ خطا در تولید تحلیل: {e}"
-        except Exception as e:
-            logger.error(f"خطا در فراخوانی Groq: {e}")
-            return f"❌ خطا در تولید تحلیل: {e}"
-
-    return "❌ سرور AI شلوغه، چند دقیقه دیگه دوباره امتحان کن."
+    """ارسال پرامپت به Groq و دریافت پاسخ فارسی پاک — با retry خودکار برای 429."""
+    try:
+        result = await groq_chat(prompt, kind="large", timeout=timeout,
+                                 max_retries=max_retries, base_delay=base_delay)
+        return _clean_ai_output(result)
+    except GroqBusyError:
+        return "❌ سرور AI شلوغه، چند دقیقه دیگه دوباره امتحان کن."
+    except Exception as e:
+        logger.error(f"خطا در فراخوانی Groq: {e}")
+        return f"❌ خطا در تولید تحلیل: {e}"
 
 
 # ─── داده‌های بازار ────────────────────────────────────────────────────────────

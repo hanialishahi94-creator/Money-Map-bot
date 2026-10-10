@@ -24,7 +24,7 @@ import logging
 import datetime
 
 import db
-from ai_analyst import _clean_ai_output
+from ai_analyst import _clean_ai_output, groq_chat
 
 logger = logging.getLogger(__name__)
 
@@ -338,69 +338,13 @@ async def _analyze(candidates: list[dict]) -> list[dict]:
     return out
 
 
-# ترتیب ترجیح مدل‌ها؛ اگه هیچ‌کدوم روی Groq نبود، از لیست زنده‌ی مدل‌ها بزرگ‌ترین مدل متنی انتخاب می‌شه
-GROQ_MODEL_PREFS = ["llama-3.3-70b", "gpt-oss-120b", "llama-4-maverick", "kimi-k2", "qwen3-32b", "llama-4-scout", "gpt-oss-20b"]
-_groq_model = os.getenv("GROQ_MODEL", "").strip() or None
-
-
-async def _pick_groq_model(client, api_key: str) -> str:
-    """مدل‌های فعال Groq رو می‌خونه و بهترین مدل چت رو انتخاب می‌کنه (Groq مدل‌ها رو مرتب بازنشسته می‌کنه)."""
-    r = await client.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {api_key}"})
-    r.raise_for_status()
-    ids = [m["id"] for m in r.json().get("data", []) if m.get("active", True)]
-    chat = [i for i in ids if not any(x in i.lower() for x in ("whisper", "guard", "tts", "embed", "distil", "prompt"))]
-    for pref in GROQ_MODEL_PREFS:
-        for i in chat:
-            if pref in i:
-                return i
-    if not chat:
-        raise RuntimeError("هیچ مدل چتی روی Groq پیدا نشد")
-    return chat[0]
-
-
 async def _groq_json(prompt: str) -> dict:
     """فراخوانی Groq در حالت JSON (بدون پاک‌ساز متنی که ممکنه JSON رو خراب کنه)."""
-    import httpx
-    global _groq_model
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY تنظیم نشده")
-    json_mode = True
-    async with httpx.AsyncClient(timeout=90) as client:
-        if not _groq_model:
-            _groq_model = await _pick_groq_model(client, api_key)
-            logger.info(f"reels_scout groq model: {_groq_model}")
-        for attempt in range(4):
-            body = {
-                "model": _groq_model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 3000,
-                "temperature": 0.6,
-            }
-            if json_mode:
-                body["response_format"] = {"type": "json_object"}
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json=body,
-            )
-            if response.status_code == 429 and attempt < 3:
-                await asyncio.sleep(int(response.headers.get("retry-after", 20)))
-                continue
-            if response.status_code == 404:          # مدل بازنشسته شده → مدل جدید انتخاب کن
-                _groq_model = await _pick_groq_model(client, api_key)
-                logger.info(f"reels_scout groq model switched to: {_groq_model}")
-                continue
-            if response.status_code == 400 and json_mode:   # مدل حالت JSON رو پشتیبانی نمی‌کنه
-                json_mode = False
-                continue
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            match = re.search(r"\{.*\}", content, re.S)
-            if not match:
-                raise ValueError(f"خروجی AI قابل خوندن نیست: {content[:150]}")
-            return json.loads(match.group(0))
-    raise RuntimeError("Groq جواب نداد")
+    content = await groq_chat(prompt, kind="large", max_tokens=3000, temperature=0.6, max_retries=3, json_mode=True)
+    match = re.search(r"\{.*\}", content, re.S)
+    if not match:
+        raise ValueError(f"خروجی AI قابل خوندن نیست: {content[:150]}")
+    return json.loads(match.group(0))
 
 
 # ─── ساخت پیام‌ها ─────────────────────────────────────────────────────────────
