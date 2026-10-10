@@ -63,10 +63,11 @@ def _http_client():
     sessionid = os.getenv("IG_SESSIONID", "").strip()
     if not sessionid:
         raise RuntimeError("IG_SESSIONID تنظیم نشده")
-    sessionid = urllib.parse.unquote(sessionid)
-    cookies = {"sessionid": sessionid}
-    if ":" in sessionid:
-        cookies["ds_user_id"] = sessionid.split(":", 1)[0]
+    # مرورگر کوکی رو به شکل encode‌شده (‎%3A‎ به‌جای ‎:‎) می‌فرسته؛ همون شکل رو بفرستیم
+    decoded = urllib.parse.unquote(sessionid)
+    cookies = {"sessionid": urllib.parse.quote(decoded, safe="")}
+    if ":" in decoded:
+        cookies["ds_user_id"] = decoded.split(":", 1)[0]
     kwargs = {}
     proxy = os.getenv("IG_PROXY", "").strip()
     if proxy:
@@ -90,8 +91,11 @@ def _http_client():
 
 def _get_json(client, path: str, params: dict) -> dict:
     r = client.get(path, params=params)
-    if r.status_code in (301, 302) or r.status_code in (401, 403):
-        raise InstagramAuthError(f"{r.status_code} login_required")
+    if r.status_code in (301, 302, 401, 403):
+        location = r.headers.get("location", "")
+        if "challenge" in location or "checkpoint" in location:
+            raise InstagramAuthError(f"{r.status_code} challenge — اینستا تأیید امنیتی می‌خواد")
+        raise InstagramAuthError(f"{r.status_code} login_required {location[:60]}".strip())
     r.raise_for_status()
     try:
         data = r.json()
