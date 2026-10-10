@@ -2971,6 +2971,7 @@ async def cmd_reels_addpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def _content_panel_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 گزارش موضوع‌های داغ (همین الان)", callback_data="rs_run")],
+        [InlineKeyboardButton("📝 متن ریلز (لینک بده، متن بگیر)", callback_data="rs_reel")],
         [InlineKeyboardButton("📋 لیست پیج‌های مرجع", callback_data="rs_list")],
         [
             InlineKeyboardButton("➕ افزودن پیج", callback_data="rs_add"),
@@ -3002,6 +3003,7 @@ async def content_panel_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     if data == "rs_panel":
         context.user_data.pop("rs_await_add", None)
+        context.user_data.pop("rs_await_reel", None)
         await query.edit_message_text("🎛 پنل ایجنت محتوا\nیکی از گزینه‌ها رو بزن:", reply_markup=_content_panel_markup())
     elif data == "rs_run":
         await query.edit_message_text("🔎 در حال گشتن پیج‌های مرجع و هشتگ‌ها... (۱-۲ دقیقه)")
@@ -3013,7 +3015,16 @@ async def content_panel_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(
             f"📋 پیج‌های مرجع ({len(pages)}):\n{lines}", reply_markup=back, disable_web_page_preview=True
         )
+    elif data == "rs_reel":
+        context.user_data.pop("rs_await_add", None)
+        context.user_data["rs_await_reel"] = True
+        await query.edit_message_text(
+            "📝 لینک ریلز رو همین‌جا بفرست تا متن گفتارش رو برات دربیارم.\n"
+            "(بعداً هر وقت خواستی می‌تونی بدون زدن این دکمه هم مستقیم لینک ریلز رو بفرستی.)",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ انصراف", callback_data="rs_panel")]]),
+        )
     elif data == "rs_add":
+        context.user_data.pop("rs_await_reel", None)
         context.user_data["rs_await_add"] = True
         await query.edit_message_text(
             "➕ لینک پیج (یا چند لینک، هر کدوم توی یه خط) رو همین‌جا بفرست.\n"
@@ -3035,12 +3046,43 @@ async def content_panel_callback(update: Update, context: ContextTypes.DEFAULT_T
     raise ApplicationHandlerStop
 
 
+async def _send_reel_transcript(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    import reels_scout
+    wait_msg = await update.message.reply_text("⏳ در حال دریافت ویدیو و تبدیل گفتار به متن... (حدود ۳۰ ثانیه)")
+    try:
+        messages = await reels_scout.transcribe_reel(text)
+    except Exception as e:
+        logger.warning(f"reel transcript failed: {e}")
+        await wait_msg.edit_text(f"⚠️ متن ریلز گرفته نشد:\n{e}")
+        return
+    await wait_msg.delete()
+    for i, msg in enumerate(messages):
+        await update.message.reply_text(
+            msg, parse_mode="HTML", disable_web_page_preview=True,
+            reply_markup=_content_panel_markup() if i == len(messages) - 1 else None,
+        )
+
+
 async def content_panel_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت لینک پیج بعد از زدن دکمه‌ی «افزودن پیج»."""
+    """پیام‌های متنی چت ادمین برای پنل محتوا: لینک ریلز → متن، یا لینک پیج بعد از «افزودن پیج»."""
     from telegram.ext import ApplicationHandlerStop
-    if not context.user_data.get("rs_await_add") or not _is_reels_admin_chat(update):
+    if not _is_reels_admin_chat(update):
         return
     import reels_scout
+    text = update.message.text or ""
+    # لینک ریلز/پست → متن گفتار (چه از دکمه‌ی «متن ریلز» اومده باشه، چه مستقیم فرستاده شده باشه)
+    auto_detect = update.effective_chat.id == REELS_SCOUT_CHAT_ID and reels_scout.find_reel_shortcode(text)
+    if not context.user_data.get("rs_await_add") and (
+        context.user_data.pop("rs_await_reel", None) or auto_detect
+    ):
+        if not reels_scout.find_reel_shortcode(text):
+            await update.message.reply_text("❌ لینک ریلز اینستاگرام نبود. از پنل دوباره «📝 متن ریلز» رو بزن.",
+                                            reply_markup=_content_panel_markup())
+        else:
+            await _send_reel_transcript(update, context, text)
+        raise ApplicationHandlerStop
+    if not context.user_data.get("rs_await_add"):
+        return
     context.user_data.pop("rs_await_add", None)
     results = []
     for item in update.message.text.split():

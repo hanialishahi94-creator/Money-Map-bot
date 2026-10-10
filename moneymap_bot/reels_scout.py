@@ -396,6 +396,110 @@ def _fallback_messages(candidates: list[dict]) -> tuple[list[str], list[str]]:
     return [msg], [c["code"] for c in top]
 
 
+# ─── متن ریلز (لینک → ویدیو → Whisper) ───────────────────────────────────────
+
+_REEL_URL_RE = re.compile(r"instagram\.com/(?:[\w.]+/)?(?:reels?|p|tv)/([A-Za-z0-9_-]+)", re.I)
+_SHORTCODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+WHISPER_MAX_BYTES = 25 * 1024 * 1024   # سقف فایل Groq Whisper
+
+
+def find_reel_shortcode(text: str) -> str | None:
+    m = _REEL_URL_RE.search(text or "")
+    return m.group(1) if m else None
+
+
+def _shortcode_to_pk(shortcode: str) -> int:
+    pk = 0
+    for ch in shortcode[:11]:
+        pk = pk * 64 + _SHORTCODE_ALPHABET.index(ch)
+    return pk
+
+
+def _fetch_reel(shortcode: str) -> dict:
+    """اطلاعات ریلز + دانلود ویدیو (sync — داخل thread اجرا می‌شه)."""
+    import httpx
+    with _http_client() as client:
+        data = _get_json(client, f"/api/v1/media/{_shortcode_to_pk(shortcode)}/info/", {})
+    items = data.get("items") or []
+    if not items:
+        raise RuntimeError("ریلز پیدا نشد (شاید پیج خصوصیه یا پست حذف شده)")
+    item = items[0]
+    video = item
+    if not item.get("video_versions"):
+        video = next((c for c in item.get("carousel_media") or [] if c.get("video_versions")), None)
+        if not video:
+            raise RuntimeError("این پست ویدیو نداره")
+    # کوچیک‌ترین کیفیت کافیه — صدا یکیه و فایل زیر سقف Whisper می‌مونه
+    version = min(video["video_versions"], key=lambda v: (v.get("width") or 0) * (v.get("height") or 0))
+    with httpx.Client(timeout=60, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as dl:
+        r = dl.get(version["url"])
+        r.raise_for_status()
+        content = r.content
+    if len(content) > WHISPER_MAX_BYTES:
+        raise RuntimeError("حجم ویدیو بیشتر از سقف ۲۵ مگابایت Whisper هست")
+    return {
+        "video": content,
+        "caption": ((item.get("caption") or {}).get("text") or ""),
+        "user": (item.get("user") or {}).get("username", ""),
+        "duration": round(video.get("video_duration") or 0),
+        "views": _views(item),
+    }
+
+
+async def _whisper(file_bytes: bytes) -> str:
+    """تبدیل گفتار ویدیو به متن با Groq Whisper (اگه مدل بازنشسته شد، مدل whisper دیگه)."""
+    import httpx
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY تنظیم نشده")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    models = ["whisper-large-v3", "whisper-large-v3-turbo"]
+    async with httpx.AsyncClient(timeout=120) as client:
+        for model in models:
+            r = await client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers,
+                files={"file": ("reel.mp4", file_bytes, "video/mp4")},
+                data={"model": model, "response_format": "text"},
+            )
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            return r.text.strip()
+    raise RuntimeError("هیچ مدل Whisper روی Groq در دسترس نیست")
+
+
+async def transcribe_reel(url_or_text: str) -> list[str]:
+    """لینک ریلز → لیست پیام‌های تلگرام (HTML) شامل متن گفتار و کپشن."""
+    shortcode = find_reel_shortcode(url_or_text)
+    if not shortcode:
+        raise ValueError("لینک ریلز اینستاگرام پیدا نشد")
+    reel = await asyncio.to_thread(_fetch_reel, shortcode)
+    transcript = await _whisper(reel["video"])
+    head = (
+        f"📝 <b>متن ریلز</b> <a href=\"https://www.instagram.com/reel/{shortcode}/\">@{html.escape(reel['user'])}</a>"
+        + (f" · {reel['duration']}ث" if reel["duration"] else "")
+        + (f" · 👁 {_fmt_num(reel['views'])}" if reel["views"] else "")
+    )
+    body = html.escape(transcript) if transcript else "(گفتاری توی ویدیو تشخیص داده نشد — احتمالاً فقط موزیک داره)"
+    messages = _chunk(f"{head}\n\n🎙 <b>گفتار:</b>\n{body}")
+    if reel["caption"].strip():
+        messages += _chunk(f"✍️ <b>کپشن:</b>\n{html.escape(reel['caption'])}")
+    return messages
+
+
+def _chunk(text: str, limit: int = 3800) -> list[str]:
+    """تقسیم متن بلند به چند پیام (سقف پیام تلگرام ۴۰۹۶ کاراکتره)."""
+    parts = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        cut = cut if cut > limit // 2 else text.rfind(" ", 0, limit)
+        cut = cut if cut > 0 else limit
+        parts.append(text[:cut])
+        text = text[cut:].lstrip()
+    return parts + [text] if text else parts
+
+
 async def scout() -> list[str]:
     """اجرای کامل؛ لیست پیام‌های آماده‌ی ارسال (HTML) رو برمی‌گردونه."""
     raw = await asyncio.to_thread(_collect_medias)
