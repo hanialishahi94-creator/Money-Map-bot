@@ -2968,6 +2968,113 @@ async def cmd_reels_addpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(results) + f"\n\nکل پیج‌ها: {len(reels_scout.reference_pages())} — /pages")
 
 
+def _content_panel_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 گزارش موضوع‌های داغ (همین الان)", callback_data="rs_run")],
+        [InlineKeyboardButton("📋 لیست پیج‌های مرجع", callback_data="rs_list")],
+        [
+            InlineKeyboardButton("➕ افزودن پیج", callback_data="rs_add"),
+            InlineKeyboardButton("➖ حذف پیج", callback_data="rs_delmenu"),
+        ],
+    ])
+
+
+async def cmd_content_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دستور /content — پنل دکمه‌ای ایجنت محتوا (بدون نیاز به حفظ کردن دستورها)."""
+    if not _is_reels_admin_chat(update):
+        return
+    await update.message.reply_text(
+        "🎛 پنل ایجنت محتوا\nیکی از گزینه‌ها رو بزن:", reply_markup=_content_panel_markup()
+    )
+
+
+async def content_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دکمه‌های پنل ایجنت محتوا."""
+    from telegram.ext import ApplicationHandlerStop
+    import reels_scout
+    query = update.callback_query
+    if not _is_reels_admin_chat(update):
+        return
+    await query.answer()
+    data = query.data
+    chat_id = update.effective_chat.id
+    back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 برگشت به پنل", callback_data="rs_panel")]])
+
+    if data == "rs_panel":
+        context.user_data.pop("rs_await_add", None)
+        await query.edit_message_text("🎛 پنل ایجنت محتوا\nیکی از گزینه‌ها رو بزن:", reply_markup=_content_panel_markup())
+    elif data == "rs_run":
+        await query.edit_message_text("🔎 در حال گشتن پیج‌های مرجع و هشتگ‌ها... (۱-۲ دقیقه)")
+        await reels_scout_job(context, chat_id=chat_id)
+        await context.bot.send_message(chat_id, "🎛 پنل ایجنت محتوا:", reply_markup=_content_panel_markup())
+    elif data == "rs_list":
+        pages = reels_scout.reference_pages()
+        lines = "\n".join(f"{i}. instagram.com/{p}" for i, p in enumerate(pages, 1)) or "— خالیه —"
+        await query.edit_message_text(
+            f"📋 پیج‌های مرجع ({len(pages)}):\n{lines}", reply_markup=back, disable_web_page_preview=True
+        )
+    elif data == "rs_add":
+        context.user_data["rs_await_add"] = True
+        await query.edit_message_text(
+            "➕ لینک پیج (یا چند لینک، هر کدوم توی یه خط) رو همین‌جا بفرست.\n"
+            "همون لینکی که از اینستا کپی می‌کنی کافیه.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ انصراف", callback_data="rs_panel")]]),
+        )
+    elif data == "rs_delmenu":
+        pages = reels_scout.reference_pages()
+        rows = [[InlineKeyboardButton(f"❌ {p}", callback_data=f"rs_del:{p}")] for p in pages]
+        rows.append([InlineKeyboardButton("🔙 برگشت به پنل", callback_data="rs_panel")])
+        await query.edit_message_text("➖ روی پیجی که می‌خوای حذف بشه بزن:", reply_markup=InlineKeyboardMarkup(rows))
+    elif data.startswith("rs_del:"):
+        page, removed = reels_scout.remove_reference_page(data.split(":", 1)[1])
+        pages = reels_scout.reference_pages()
+        rows = [[InlineKeyboardButton(f"❌ {p}", callback_data=f"rs_del:{p}")] for p in pages]
+        rows.append([InlineKeyboardButton("🔙 برگشت به پنل", callback_data="rs_panel")])
+        msg = f"🗑 {page} حذف شد." if removed else f"ℹ️ {page} توی لیست نبود."
+        await query.edit_message_text(f"{msg}\n\n➖ برای حذف پیج دیگه روش بزن:", reply_markup=InlineKeyboardMarkup(rows))
+    raise ApplicationHandlerStop
+
+
+async def content_panel_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت لینک پیج بعد از زدن دکمه‌ی «افزودن پیج»."""
+    from telegram.ext import ApplicationHandlerStop
+    if not context.user_data.get("rs_await_add") or not _is_reels_admin_chat(update):
+        return
+    import reels_scout
+    context.user_data.pop("rs_await_add", None)
+    results = []
+    for item in update.message.text.split():
+        page, added = reels_scout.add_reference_page(item)
+        if not page:
+            results.append(f"❌ {item[:40]} — لینک/یوزرنیم معتبر نیست")
+        elif added:
+            results.append(f"✅ {page} اضافه شد")
+        else:
+            results.append(f"ℹ️ {page} از قبل توی لیست بود")
+    await update.message.reply_text(
+        "\n".join(results) + f"\n\nکل پیج‌ها: {len(reels_scout.reference_pages())}",
+        reply_markup=_content_panel_markup(),
+    )
+    raise ApplicationHandlerStop
+
+
+async def _set_content_commands(context: ContextTypes.DEFAULT_TYPE):
+    """دستورها رو توی منوی آبی تلگرام (Menu) چت ادمین نشون بده تا حفظ کردن لازم نباشه."""
+    from telegram import BotCommand, BotCommandScopeChat
+    try:
+        await context.bot.set_my_commands(
+            [
+                BotCommand("content", "🎛 پنل ایجنت محتوا"),
+                BotCommand("reels", "🎬 گزارش موضوع‌های داغ ریلز"),
+                BotCommand("pages", "📋 لیست پیج‌های مرجع"),
+                BotCommand("start", "منوی اصلی بات"),
+            ],
+            scope=BotCommandScopeChat(REELS_SCOUT_CHAT_ID),
+        )
+    except Exception as e:
+        logger.warning(f"set_my_commands failed: {e}")
+
+
 async def cmd_reels_delpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور /delpage — حذف پیج مرجع."""
     if not _is_reels_admin_chat(update):
@@ -3330,6 +3437,10 @@ def main():
     app.add_handler(CommandHandler("pages", cmd_reels_pages))
     app.add_handler(CommandHandler("addpage", cmd_reels_addpage))
     app.add_handler(CommandHandler("delpage", cmd_reels_delpage))
+    app.add_handler(CommandHandler("content", cmd_content_panel))
+    # group=-1 تا قبل از ConversationHandler اجرا بشن (وگرنه متن لینک رو state‌های دیگه می‌گیرن)
+    app.add_handler(CallbackQueryHandler(content_panel_callback, pattern="^rs_"), group=-1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, content_panel_add_text), group=-1)
     app.add_handler(CallbackQueryHandler(ai_approve_callback, pattern=r"^ai_approve:"))
     app.add_handler(CallbackQueryHandler(ai_edit_callback, pattern=r"^ai_edit:"))
     # این handler باید با group=-1 ثبت بشه تا قبل از ConversationHandler اجرا بشه
@@ -3373,6 +3484,7 @@ def main():
             time=_dt.time(hour=9, minute=0, tzinfo=_tehran),
             name="daily_ai_analysis",
         )
+        app.job_queue.run_once(_set_content_commands, when=5)
         # گزارش موضوع‌های داغ ریلز — چند بار در روز
         if os.getenv("IG_SESSIONID"):
             for _h in REELS_SCOUT_HOURS.split(","):
