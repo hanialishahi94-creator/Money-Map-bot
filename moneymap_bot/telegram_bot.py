@@ -84,6 +84,8 @@ def _get_analysis_text(asset: str) -> str:
 # ===================================================
 
 logging.basicConfig(level=logging.INFO)
+# httpx هر درخواست رو با URL کامل لاگ می‌کنه که توکن بات توشه — فقط هشدار/خطاهاش لاگ بشه
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # توجه: کاربران و اعضای VIP حالا در دیتابیس (db.py) ذخیره می‌شوند، نه در حافظه.
