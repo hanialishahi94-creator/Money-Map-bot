@@ -11,6 +11,8 @@ reels_scout.py — شکار موضوع‌های داغ ریلز مالی از ا
 متغیرهای محیطی:
   IG_SESSIONID   — کوکی sessionid اکانت اینستاگرام (ترجیحاً یک اکانت فرعی، نه اکانت اصلی)
   REFERENCE_PAGES — (اختیاری) یوزرنیم پیج‌های مرجع، جدا با کاما — پیش‌فرض: REFERENCE_PAGES_DEFAULT
+  APIFY_TOKEN    — (پیشنهادی) توکن Apify؛ اینستا IP سرورها (Railway) رو محدود می‌کنه، Apify از سرور هم جواب می‌ده.
+                   پیج‌های مرجع روزی یه بار و متن ریلز از این طریق خونده می‌شه (توی اعتبار رایگان ماهانه‌ی Apify جا می‌شه)
   IG_PROXY       — (اختیاری) پراکسی، مثلاً http://user:pass@host:port — IP سرورها معمولاً توسط اینستا محدود می‌شه
 """
 import os
@@ -231,6 +233,11 @@ def _fetch_page(client, username: str, fallback=None) -> list[dict]:
         data = _get_json(fallback, path, {"count": 24})
     medias = []
     _walk_medias(data, medias)
+    return _add_ratios(medias, username)
+
+
+def _add_ratios(medias: list[dict], username: str) -> list[dict]:
+    """نسبت بازدید هر ریلز به میانه‌ی بازدید ریلزهای همون پیج."""
     views = sorted(_views(m) for m in medias if m.get("media_type") == 2 and _views(m))
     median = views[len(views) // 2] if views else 0
     for m in medias:
@@ -239,6 +246,84 @@ def _fetch_page(client, username: str, fallback=None) -> list[dict]:
         m["user"] = user
         m["_ratio"] = round(_views(m) / median, 1) if median else 0
     return medias
+
+
+# ─── Apify (اسکرپر آماده — از IP سرور هم کار می‌کنه) ──────────────────────────
+
+APIFY_ACTOR = "apify~instagram-scraper"
+APIFY_CACHE_KEY = "reels_scout_apify_pages"
+APIFY_CACHE_HOURS = 20          # پیج‌های مرجع روزی یه بار از Apify (برای موندن توی اعتبار رایگان)
+APIFY_POSTS_PER_PAGE = 12
+
+
+def _apify_token() -> str:
+    return os.getenv("APIFY_TOKEN", "").strip()
+
+
+def _apify_run(actor_input: dict, timeout: int = 240) -> list[dict]:
+    import httpx
+    r = httpx.post(
+        f"https://api.apify.com/v2/acts/{APIFY_ACTOR}/run-sync-get-dataset-items",
+        headers={"Authorization": f"Bearer {_apify_token()}"},
+        json=actor_input, timeout=timeout,
+    )
+    if r.status_code in (401, 403):
+        raise RuntimeError("توکن Apify نامعتبره (APIFY_TOKEN رو چک کن)")
+    if r.status_code == 402:
+        raise RuntimeError("اعتبار ماهانه‌ی Apify تموم شده")
+    r.raise_for_status()
+    items = r.json()
+    if items and isinstance(items[0], dict) and items[0].get("error"):
+        raise RuntimeError(f"Apify: {items[0].get('errorDescription') or items[0]['error']}")
+    return items
+
+
+def _apify_to_media(it: dict) -> dict:
+    """تبدیل خروجی Apify به همون فرمت مدیای وب اینستا که بقیه‌ی کد باهاش کار می‌کنه."""
+    ts = it.get("timestamp") or ""
+    try:
+        taken = int(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        taken = int(time.time())
+    media = {
+        "code": it.get("shortCode"),
+        "media_type": 2 if it.get("type") == "Video" or it.get("videoUrl") else 1,
+        "taken_at": taken,
+        "video_duration": it.get("videoDuration") or 0,
+        "play_count": it.get("videoPlayCount") or it.get("videoViewCount") or 0,
+        "like_count": max(it.get("likesCount") or 0, 0),
+        "comment_count": it.get("commentsCount") or 0,
+        "caption": {"text": it.get("caption") or ""},
+        "user": {"username": it.get("ownerUsername") or ""},
+    }
+    if it.get("videoUrl"):
+        media["video_versions"] = [{"url": it["videoUrl"], "width": 0, "height": 0}]
+    return media
+
+
+def _apify_pages(pages: list[str]) -> list[tuple[dict, str]]:
+    """پست‌های اخیر پیج‌های مرجع از Apify — با کش روزانه (گزارش‌های ۱۵ و ۲۱ از همون نتیجه استفاده می‌کنن)."""
+    cached = json.loads(db.get_setting(APIFY_CACHE_KEY, "{}") or "{}")
+    if cached.get("pages") == pages and time.time() - cached.get("at", 0) < APIFY_CACHE_HOURS * 3600:
+        logger.info("reels_scout apify: using cached reference pages")
+        return [(m, s) for m, s in cached["items"]]
+    items = _apify_run({
+        "directUrls": [f"https://www.instagram.com/{p}/" for p in pages],
+        "resultsType": "posts",
+        "resultsLimit": APIFY_POSTS_PER_PAGE,
+        "onlyPostsNewerThan": f"{REF_MAX_AGE_DAYS} days",
+    })
+    by_page: dict[str, list[dict]] = {}
+    for it in items:
+        m = _apify_to_media(it)
+        if m["code"]:
+            by_page.setdefault(m["user"]["username"].lower(), []).append(m)
+    result = []
+    for page, medias in by_page.items():
+        result += [(m, f"@{page}") for m in _add_ratios(medias, page)]
+    logger.info(f"reels_scout apify: {len(items)} posts from {len(by_page)} pages")
+    db.set_setting(APIFY_CACHE_KEY, json.dumps({"at": time.time(), "pages": pages, "items": result}))
+    return result
 
 
 def _collect_medias() -> list:
@@ -250,6 +335,15 @@ def _collect_medias() -> list:
         anon = stack.enter_context(_http_client(auth=False))
         client = stack.enter_context(_http_client()) if os.getenv("IG_SESSIONID", "").strip() else None
         sources = [(f"@{p}", "page", p) for p in reference_pages()]
+        if _apify_token() and sources:
+            try:
+                found = _apify_pages(reference_pages())
+                medias += found
+                ok += 1
+                sources = []          # پیج‌ها از Apify اومدن؛ مستقیم نخون
+            except Exception as e:
+                logger.warning(f"reels_scout apify pages: {e}")
+                errors.append(f"Apify: {e}")
         if client is not None:          # هشتگ‌ها فقط با اکانت جواب می‌دن
             sources += [(f"#{t}", "tag", t) for t in _next_hashtags()]
         for source, kind, name in sources:
@@ -474,18 +568,29 @@ def _find_in_feed(client, username: str, shortcode: str, pages: int = 6) -> dict
 
 def _fetch_reel(shortcode: str) -> dict:
     """اطلاعات ریلز + دانلود ویدیو (sync — داخل thread اجرا می‌شه).
-    اول از مسیر عمومی (بدون اکانت)، اگه نشد با اکانت اینستا."""
+    به ترتیب: Apify (اگه توکن داره) → مسیر عمومی بدون اکانت → با اکانت اینستا."""
     import httpx
     item, errors = None, []
-    try:
-        owner = _reel_owner(shortcode)
-        if owner:
-            with _http_client(auth=False) as anon:
-                item = _find_in_feed(anon, owner, shortcode)
-        if not item:
-            errors.append("مسیر عمومی: ریلز توی پست‌های اخیر پیج پیدا نشد")
-    except Exception as e:
-        errors.append(f"مسیر عمومی: {e}")
+    if _apify_token():
+        try:
+            found = _apify_run({
+                "directUrls": [f"https://www.instagram.com/reel/{shortcode}/"],
+                "resultsType": "posts", "resultsLimit": 1,
+            }, timeout=180)
+            if found:
+                item = _apify_to_media(found[0])
+        except Exception as e:
+            errors.append(f"Apify: {e}")
+    if not item:
+        try:
+            owner = _reel_owner(shortcode)
+            if owner:
+                with _http_client(auth=False) as anon:
+                    item = _find_in_feed(anon, owner, shortcode)
+            if not item:
+                errors.append("مسیر عمومی: ریلز توی پست‌های اخیر پیج پیدا نشد")
+        except Exception as e:
+            errors.append(f"مسیر عمومی: {e}")
     if not item:
         try:
             with _http_client() as client:
