@@ -37,7 +37,8 @@ REFERENCE_PAGES_DEFAULT = ["lurax.news", "golabi.economy", "vilifinance", "mikof
 TOP_REFERENCE = 15            # چندتا از ریلزهای پیج‌های مرجع به AI داده بشه
 TOP_HASHTAG = 10              # چندتا از ریلزهای هشتگ‌ها
 MAX_DURATION = 65             # ثانیه
-MAX_AGE_DAYS = 7
+MAX_AGE_DAYS = 7               # هشتگ‌ها
+REF_MAX_AGE_DAYS = 14          # پیج‌های مرجع کمتر پست می‌ذارن
 SENT_KEY = "reels_scout_sent"
 ROTATION_KEY = "reels_scout_rotation"
 
@@ -62,27 +63,33 @@ class InstagramAuthError(RuntimeError):
 
 # ─── اینستاگرام (API نسخه‌ی وب — همونی که مرورگر استفاده می‌کنه) ──────────────
 
-def _http_client():
+def _http_client(auth: bool = True):
+    """کلاینت وب اینستا. auth=False یعنی بدون اکانت (برای پیج‌های عمومی) — ریسکی برای اکانت نداره.
+    قبل از هر چیز صفحه‌ی اصلی رو باز می‌کنه تا کوکی csrftoken/mid بگیره؛ بعضی endpointها بدونش به لاگین ریدایرکت می‌کنن."""
     import httpx
     import urllib.parse
-    sessionid = os.getenv("IG_SESSIONID", "").strip()
-    if not sessionid:
-        raise RuntimeError("IG_SESSIONID تنظیم نشده")
-    # مرورگر کوکی رو به شکل encode‌شده (‎%3A‎ به‌جای ‎:‎) می‌فرسته؛ همون شکل رو بفرستیم
-    decoded = urllib.parse.unquote(sessionid)
-    cookies = {"sessionid": urllib.parse.quote(decoded, safe="")}
-    if ":" in decoded:
-        cookies["ds_user_id"] = decoded.split(":", 1)[0]
+    cookies = {}
+    if auth:
+        sessionid = os.getenv("IG_SESSIONID", "").strip()
+        if not sessionid:
+            raise RuntimeError("IG_SESSIONID تنظیم نشده")
+        # مرورگر کوکی رو به شکل encode‌شده (‎%3A‎ به‌جای ‎:‎) می‌فرسته؛ همون شکل رو بفرستیم
+        decoded = urllib.parse.unquote(sessionid)
+        cookies = {"sessionid": urllib.parse.quote(decoded, safe="")}
+        if ":" in decoded:
+            cookies["ds_user_id"] = decoded.split(":", 1)[0]
     kwargs = {}
     proxy = os.getenv("IG_PROXY", "").strip()
     if proxy:
         kwargs["proxy"] = proxy
-    return httpx.Client(
+    client = httpx.Client(
         base_url="https://www.instagram.com",
         cookies=cookies,
         headers={
             "User-Agent": USER_AGENT,
             "X-IG-App-ID": IG_APP_ID,
+            "X-ASBD-ID": "129477",
+            "X-IG-WWW-Claim": "0",
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "*/*",
             "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -92,6 +99,18 @@ def _http_client():
         follow_redirects=False,
         **kwargs,
     )
+    try:
+        # درخواست جدا (نه با خود client) تا client هنوز باز نشده باشه و بشه با «with» استفاده‌اش کرد
+        warm = httpx.get("https://www.instagram.com/", timeout=20, cookies=cookies,
+                         headers={"User-Agent": USER_AGENT, "Accept": "text/html"}, **kwargs)
+        for name in ("csrftoken", "mid", "ig_did"):
+            if warm.cookies.get(name):
+                client.cookies.set(name, warm.cookies[name], domain=".instagram.com")
+        if warm.cookies.get("csrftoken"):
+            client.headers["X-CSRFToken"] = warm.cookies["csrftoken"]
+    except Exception as e:
+        logger.info(f"instagram warm-up failed: {e}")
+    return client
 
 
 def _get_json(client, path: str, params: dict) -> dict:
@@ -199,17 +218,17 @@ def remove_reference_page(text: str) -> tuple[str, bool]:
     return page, True
 
 
-def _fetch_page(client, username: str) -> list[dict]:
+def _fetch_page(client, username: str, fallback=None) -> list[dict]:
     """آخرین پست‌های یک پیج + نسبت بازدید هر ریلز به میانه‌ی بازدید همون پیج."""
+    path = f"/api/v1/feed/user/{username}/username/"   # همون endpointی که گرید پروفایل وب صدا می‌زنه
     try:
-        # همون endpointی که صفحه‌ی پروفایل وب اینستا برای گرید پست‌ها صدا می‌زنه
-        data = _get_json(client, f"/api/v1/feed/user/{username}/username/", {"count": 24})
-    except InstagramAuthError:
-        raise
+        data = _get_json(client, path, {"count": 24})
     except Exception as e:
-        logger.info(f"reels_scout @{username} feed failed ({e}) — fallback web_profile_info")
+        if fallback is None:
+            raise
+        logger.info(f"reels_scout @{username} anonymous feed failed ({e}) — retry with account")
         time.sleep(random.uniform(2, 4))
-        data = _get_json(client, "/api/v1/users/web_profile_info/", {"username": username})
+        data = _get_json(fallback, path, {"count": 24})
     medias = []
     _walk_medias(data, medias)
     views = sorted(_views(m) for m in medias if m.get("media_type") == 2 and _views(m))
@@ -225,12 +244,17 @@ def _fetch_page(client, username: str) -> list[dict]:
 def _collect_medias() -> list:
     """جمع‌آوری ریلز از پیج‌های مرجع و هشتگ‌ها (sync — داخل thread اجرا می‌شه)."""
     medias, errors, ok = [], [], 0
-    with _http_client() as client:
-        sources = [(f"@{p}", "page", p) for p in reference_pages()] + \
-                  [(f"#{t}", "tag", t) for t in _next_hashtags()]
+    # پیج‌های عمومی بدون اکانت خونده می‌شن (اکانت اینستا فقط برای هشتگ‌ها لازمه)
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        anon = stack.enter_context(_http_client(auth=False))
+        client = stack.enter_context(_http_client()) if os.getenv("IG_SESSIONID", "").strip() else None
+        sources = [(f"@{p}", "page", p) for p in reference_pages()]
+        if client is not None:          # هشتگ‌ها فقط با اکانت جواب می‌دن
+            sources += [(f"#{t}", "tag", t) for t in _next_hashtags()]
         for source, kind, name in sources:
             try:
-                found = _fetch_page(client, name) if kind == "page" else _fetch_hashtag(client, name)
+                found = _fetch_page(anon, name, fallback=client) if kind == "page" else _fetch_hashtag(client, name)
                 ok += 1
                 medias += [(m, source) for m in found]
                 logger.info(f"reels_scout {source}: {len(found)} media")
@@ -271,11 +295,12 @@ def _filter_candidates(raw: list) -> list[dict]:
         if m.get("media_type") != 2:
             continue
         duration = m.get("video_duration") or 0
-        if duration and duration > MAX_DURATION:
+        if source.startswith("#") and duration and duration > MAX_DURATION:
             continue
-        if m.get("taken_at") and now - m["taken_at"] > MAX_AGE_DAYS * 86400:
+        max_age = REF_MAX_AGE_DAYS if source.startswith("@") else MAX_AGE_DAYS
+        if m.get("taken_at") and now - m["taken_at"] > max_age * 86400:
             continue
-        if not _PERSIAN_RE.search(caption):
+        if source.startswith("#") and not _PERSIAN_RE.search(caption):
             continue
         seen.add(code)
         out.append({
@@ -415,15 +440,59 @@ def _shortcode_to_pk(shortcode: str) -> int:
     return pk
 
 
-def _fetch_reel(shortcode: str) -> dict:
-    """اطلاعات ریلز + دانلود ویدیو (sync — داخل thread اجرا می‌شه)."""
+def _reel_owner(shortcode: str) -> str | None:
+    """یوزرنیم صاحب ریلز از صفحه‌ی عمومی پست (متای og:description: «... - username on date»)."""
     import httpx
-    with _http_client() as client:
-        data = _get_json(client, f"/api/v1/media/{_shortcode_to_pk(shortcode)}/info/", {})
-    items = data.get("items") or []
-    if not items:
-        raise RuntimeError("ریلز پیدا نشد (شاید پیج خصوصیه یا پست حذف شده)")
-    item = items[0]
+    r = httpx.get(
+        f"https://www.instagram.com/reel/{shortcode}/", timeout=30, follow_redirects=True,
+        headers={"User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"},
+    )
+    m = re.search(r'property="og:description"[^>]*content="[^"]*? - ([A-Za-z0-9._]+) on ', r.text) or \
+        re.search(r'content="[^"]*? - ([A-Za-z0-9._]+) on [^"]*"[^>]*property="og:description"', r.text)
+    return m.group(1) if m else None
+
+
+def _find_in_feed(client, username: str, shortcode: str, pages: int = 6) -> dict | None:
+    """پست موردنظر رو توی گرید عمومی پیج پیدا می‌کنه (تا چند صفحه عقب)."""
+    max_id = None
+    for _ in range(pages):
+        params = {"count": 12}
+        if max_id:
+            params["max_id"] = max_id
+        data = _get_json(client, f"/api/v1/feed/user/{username}/username/", params)
+        for item in data.get("items") or []:
+            if item.get("code") == shortcode:
+                return item
+        max_id = data.get("next_max_id")
+        if not data.get("more_available") or not max_id:
+            return None
+        time.sleep(random.uniform(1, 2))
+    return None
+
+
+def _fetch_reel(shortcode: str) -> dict:
+    """اطلاعات ریلز + دانلود ویدیو (sync — داخل thread اجرا می‌شه).
+    اول از مسیر عمومی (بدون اکانت)، اگه نشد با اکانت اینستا."""
+    import httpx
+    item, errors = None, []
+    try:
+        owner = _reel_owner(shortcode)
+        if owner:
+            with _http_client(auth=False) as anon:
+                item = _find_in_feed(anon, owner, shortcode)
+        if not item:
+            errors.append("مسیر عمومی: ریلز توی پست‌های اخیر پیج پیدا نشد")
+    except Exception as e:
+        errors.append(f"مسیر عمومی: {e}")
+    if not item:
+        try:
+            with _http_client() as client:
+                data = _get_json(client, f"/api/v1/media/{_shortcode_to_pk(shortcode)}/info/", {})
+            item = (data.get("items") or [None])[0]
+        except Exception as e:
+            errors.append(f"با اکانت: {e}")
+    if not item:
+        raise RuntimeError("ریلز گرفته نشد (شاید پیج خصوصیه یا پست حذف شده)\n" + "\n".join(errors))
     video = item
     if not item.get("video_versions"):
         video = next((c for c in item.get("carousel_media") or [] if c.get("video_versions")), None)
