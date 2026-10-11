@@ -3006,7 +3006,9 @@ async def content_panel_callback(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.pop("rs_await_reel", None)
         await query.edit_message_text("🎛 پنل ایجنت محتوا\nیکی از گزینه‌ها رو بزن:", reply_markup=_content_panel_markup())
     elif data == "rs_run":
-        await query.edit_message_text("🔎 در حال گشتن پیج‌های مرجع و هشتگ‌ها... (۱-۲ دقیقه)")
+        # پیام جدید، نه ویرایش پیام قبلی (ممکنه پیام قبلی محتوایی باشه که نباید پاک بشه)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(chat_id, "🔎 در حال گشتن پیج‌های مرجع و هشتگ‌ها... (۱-۲ دقیقه)")
         await reels_scout_job(context, chat_id=chat_id)
         await context.bot.send_message(chat_id, "🎛 پنل ایجنت محتوا:", reply_markup=_content_panel_markup())
     elif data == "rs_list":
@@ -3056,11 +3058,10 @@ async def _send_reel_transcript(update: Update, context: ContextTypes.DEFAULT_TY
         await wait_msg.edit_text(f"⚠️ متن ریلز گرفته نشد:\n{e}")
         return
     await wait_msg.delete()
-    for i, msg in enumerate(messages):
-        await update.message.reply_text(
-            msg, parse_mode="HTML", disable_web_page_preview=True,
-            reply_markup=_content_panel_markup() if i == len(messages) - 1 else None,
-        )
+    for msg in messages:
+        await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
+    # پنل همیشه پیام جدا — دکمه‌هاش پیام خودش رو ویرایش می‌کنن و نباید متن ریلز پاک بشه
+    await update.message.reply_text("🎛 پنل ایجنت محتوا:", reply_markup=_content_panel_markup())
 
 
 async def content_panel_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
