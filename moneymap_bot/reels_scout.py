@@ -254,6 +254,13 @@ APIFY_ACTOR = "apify~instagram-scraper"
 APIFY_CACHE_KEY = "reels_scout_apify_pages"
 APIFY_CACHE_HOURS = 20          # پیج‌های مرجع روزی یه بار از Apify (برای موندن توی اعتبار رایگان)
 APIFY_POSTS_PER_PAGE = 12
+# سهم روزانه از اعتبار رایگان ۵ دلاری (≈۲.۷ دلار برای هر ۱۰۰۰ نتیجه): ≈۶۰ نتیجه در روز، چندتاش برای متن ریلز کنار گذاشته شده
+APIFY_DAILY_PAGE_RESULTS = 55
+
+
+def _apify_posts_per_page(n_pages: int) -> int:
+    """هر چی پیج بیشتر، پست کمتر از هر پیج — تا مصرف ماهانه توی اعتبار رایگان بمونه."""
+    return max(4, min(APIFY_POSTS_PER_PAGE, APIFY_DAILY_PAGE_RESULTS // max(n_pages, 1)))
 
 
 def _apify_token() -> str:
@@ -310,7 +317,7 @@ def _apify_pages(pages: list[str]) -> list[tuple[dict, str]]:
     items = _apify_run({
         "directUrls": [f"https://www.instagram.com/{p}/" for p in pages],
         "resultsType": "posts",
-        "resultsLimit": APIFY_POSTS_PER_PAGE,
+        "resultsLimit": _apify_posts_per_page(len(pages)),
         "onlyPostsNewerThan": f"{REF_MAX_AGE_DAYS} days",
     })
     by_page: dict[str, list[dict]] = {}
@@ -525,6 +532,20 @@ WHISPER_MAX_BYTES = 25 * 1024 * 1024   # سقف فایل Groq Whisper
 def find_reel_shortcode(text: str) -> str | None:
     m = _REEL_URL_RE.search(text or "")
     return m.group(1) if m else None
+
+
+_PROFILE_URL_RE = re.compile(r"instagram\.com/([A-Za-z0-9._]{1,30})/?(?:[?#\s]|$)", re.I)
+_NOT_PROFILES = {"p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "about", "developer"}
+
+
+def find_profile_username(text: str) -> str | None:
+    """لینک پروفایل (نه پست/ریلز) → یوزرنیم."""
+    if find_reel_shortcode(text):
+        return None
+    m = _PROFILE_URL_RE.search(text or "")
+    if not m or m.group(1).lower() in _NOT_PROFILES:
+        return None
+    return normalize_page(m.group(1)) or None
 
 
 def _shortcode_to_pk(shortcode: str) -> int:

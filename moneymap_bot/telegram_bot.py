@@ -3038,6 +3038,11 @@ async def content_panel_callback(update: Update, context: ContextTypes.DEFAULT_T
         rows = [[InlineKeyboardButton(f"❌ {p}", callback_data=f"rs_del:{p}")] for p in pages]
         rows.append([InlineKeyboardButton("🔙 برگشت به پنل", callback_data="rs_panel")])
         await query.edit_message_text("➖ روی پیجی که می‌خوای حذف بشه بزن:", reply_markup=InlineKeyboardMarkup(rows))
+    elif data.startswith("rs_addp:"):
+        page, added = reels_scout.add_reference_page(data.split(":", 1)[1])
+        msg = f"✅ @{page} به پیج‌های مرجع اضافه شد." if added else f"ℹ️ @{page} از قبل توی لیست بود."
+        await query.edit_message_text(f"{msg}\nکل پیج‌ها: {len(reels_scout.reference_pages())}")
+        await context.bot.send_message(chat_id, "🎛 پنل ایجنت محتوا:", reply_markup=_content_panel_markup())
     elif data.startswith("rs_del:"):
         page, removed = reels_scout.remove_reference_page(data.split(":", 1)[1])
         pages = reels_scout.reference_pages()
@@ -3071,8 +3076,24 @@ async def content_panel_add_text(update: Update, context: ContextTypes.DEFAULT_T
         return
     import reels_scout
     text = update.message.text or ""
+    in_dm = update.effective_chat.id == REELS_SCOUT_CHAT_ID
+    # لینک پروفایل (نه ریلز) وقتی منتظر «افزودن پیج» نیستیم → پیشنهاد اضافه کردن به پیج‌های مرجع
+    profile = reels_scout.find_profile_username(text)
+    if profile and not context.user_data.get("rs_await_add") and (in_dm or context.user_data.get("rs_await_reel")):
+        context.user_data.pop("rs_await_reel", None)
+        if profile in reels_scout.reference_pages():
+            await update.message.reply_text(f"ℹ️ {profile} از قبل توی پیج‌های مرجع هست.", reply_markup=_content_panel_markup())
+        else:
+            await update.message.reply_text(
+                f"این لینک یه پیجه (@{profile})، نه ریلز.\nبه پیج‌های مرجع اضافه‌اش کنم؟",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("➕ آره، اضافه کن", callback_data=f"rs_addp:{profile}"),
+                    InlineKeyboardButton("❌ نه", callback_data="rs_panel"),
+                ]]),
+            )
+        raise ApplicationHandlerStop
     # لینک ریلز/پست → متن گفتار (چه از دکمه‌ی «متن ریلز» اومده باشه، چه مستقیم فرستاده شده باشه)
-    auto_detect = update.effective_chat.id == REELS_SCOUT_CHAT_ID and reels_scout.find_reel_shortcode(text)
+    auto_detect = in_dm and reels_scout.find_reel_shortcode(text)
     if not context.user_data.get("rs_await_add") and (
         context.user_data.pop("rs_await_reel", None) or auto_detect
     ):
