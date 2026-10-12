@@ -113,7 +113,16 @@ async def is_member_of_channel(bot, user_id):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # هر بار /start زده بشه، از اول شروع می‌کنیم (اسم و شماره دوباره پرسیده می‌شه)
+    # کاربری که قبلاً ثبت‌نام کرده دوباره اسم و شماره نمی‌ده: مستقیم منوی اصلی
+    # (یا اگه از کانال بیرون رفته، فقط مرحله‌ی عضویت)
+    existing = db.get_user(update.effective_user.id)
+    if existing and existing.get("phone"):
+        if await is_member_of_channel(context.bot, update.effective_user.id):
+            await show_main_menu(update, context)
+            return MAIN_MENU
+        await ask_to_join_channel(update, context)
+        return CHECK_MEMBERSHIP
+    # کاربر جدید: ثبت‌نام از اول
     # اگه کاربر از طریق لینک رفرال (معرفی دوستان) وارد شده باشه، آیدی معرف رو موقتاً ذخیره کن
     if context.args:
         arg = context.args[0]
